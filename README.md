@@ -11,6 +11,10 @@ The screenshot is based on the DOM and as such may not be 100% accurate to the r
 
 ## Changelog
 
+#### Spring 1.9.6 - CORS support, force vertical orientation, replace DOM Selector color option with filename option, add direct download option
+
+---
+
 #### 1.9.5 - Added option to export screenshot as a PDF file
 
 #### 1.9.4 - get proper width/height of elements if JQuery Selector != body
