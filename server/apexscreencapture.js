@@ -1,40 +1,75 @@
-// APEX Screen capture functions
-// Author: Daniel Hochleitner
-// Version: 1.9.5
+// APEX Screen Capture
+// Author: Daniel Hochleitner - updated by Austin Huizinga
+// Version: 2.0.0
+
+const MARGIN_MM = 10; // side + top/bottom margin
+const JPEG_QUALITY = 0.9; // 0-1 smaller → stronger compression
+const A4_WIDTH_MM = 210; // portrait width
+const A4_HEIGHT_MM = 297; // portrait height
+const PDF_MAX_MM = 5080; // Max pdf height in mm
+const A4_CONTENT_WIDTH_MM = A4_WIDTH_MM - 2 * MARGIN_MM; // content width
+const A4_CONTENT_HEIGHT_MM = A4_HEIGHT_MM - 2 * MARGIN_MM; // content height
+const PX_PER_MM = 96 / 25.4; // jsPDF’s dpi assumption
+const DEFAULT_FILENAME = "screencapture"; // default file name
+
+const CLOB_CHUNK_SIZE = 30000; // max. size of f01 array elements
+
+const ICON_BASE = apex_img_dir || "/i/"; // UT image dir (APEX adds apex_img_dir)
+
+const PDFSHIFT_KEY = "####";
+const USE_PDFSHIFT_SANDBOX = true; // use sandbox mode (no credits deducted, watermark)
+
+const UT_CSS_URL =
+  "https://app.springsolutions.com/i/themes/theme_42/22.2/css/Core.min.css";
+const FONT_APEX_CSS =
+  "https://app.springsolutions.com/i/libraries/font-apex/2.2.1/css/font-apex.min.css";
 
 // global namespace
 var apexScreenCapture = {
-  // parse string to boolean
-  parseBoolean: function (pString) {
-    var pBoolean;
-    if (pString.toLowerCase() == "true") {
-      pBoolean = true;
-    }
-    if (pString.toLowerCase() == "false") {
-      pBoolean = false;
-    }
-    if (
-      !(pString.toLowerCase() == "true") &&
-      !(pString.toLowerCase() == "false")
-    ) {
-      pBoolean = undefined;
-    }
-    return pBoolean;
+  /* -------------------------------------------------------------------- */
+  /*  Util                                                                */
+  /* -------------------------------------------------------------------- */
+
+  /**
+   * Parse a booleanish string.
+   * @param   {string} str   Boolean string 'true' or 'false'
+   * @returns {boolean|undefined} `true`, `false`, or `undefined` if not convertible.
+   */
+  parseBoolean(str) {
+    if (typeof str !== "string") return undefined;
+    const s = str.trim().toLowerCase();
+    if (s === "true") return true;
+    if (s === "false") return false;
+    return undefined;
   },
-  // builds a js array from long string
-  clob2Array: function (clob, size, array) {
-    loopCount = Math.floor(clob.length / size) + 1;
-    for (var i = 0; i < loopCount; i++) {
-      array.push(clob.slice(size * i, size * (i + 1)));
+  /**
+   * Split a large CLOB-like string into chunks that fit APEX f01 arrays.
+   * @param   {string}  clob        Very large base64 / text string.
+   * @param   {number}  chunkSize   Maximum size per element
+   * @returns {string[]}            Array of sliced strings.
+   */
+  clob2Array(clob, chunkSize) {
+    /** @type {string[]} */
+    const out = [];
+    for (let i = 0; i < clob.length; i += chunkSize) {
+      out.push(clob.slice(i, i + chunkSize));
     }
-    return array;
+    return out;
   },
-  // converts DataURI to base64 string
-  dataURI2base64: function (dataURI) {
-    var base64 = dataURI.substr(dataURI.indexOf(",") + 1);
-    return base64;
+  /**
+   * Extract Base64 part from a data-URI.
+   * @param   {string} dataURI
+   * @returns {string}
+   */
+  dataURI2base64(dataURI) {
+    return dataURI.substring(dataURI.indexOf(",") + 1);
   },
-  // Convert SVG to temp. Canvas
+  /**
+   * Replace every <svg> inside `container` with a temporary <canvas>
+   * (needed because html2canvas cannot rasterise inline SVG).
+   * @param {string|HTMLElement|jQuery} containerSelector
+   * @param {Function}                 done  Callback after conversion.
+   */
   svg2canvas: function (containerSelector, callback) {
     try {
       var canvas, xml;
@@ -63,384 +98,474 @@ var apexScreenCapture = {
       callback();
     }
   },
-  // Convert image to PDF
-  // Image Ratio: https://stackoverflow.com/questions/36472094/how-to-set-image-to-fit-width-of-the-page-using-jspdf/54336658#54336658
-  //   convertImage2PDF: function(pCanvas) {
-  //     var pdf = new jsPDF('l', 'mm', 'a4');
-  //     var imgData = pCanvas.toDataURL('image/jpeg');
-  //     var imgWidth = pCanvas.width;
-  //     var imgHeight = pCanvas.height;
-  //     var imgRatio = imgWidth / imgHeight;
-  //     var pageWidth = pdf.internal.pageSize.getWidth();
-  //     var pageHeight = pdf.internal.pageSize.getHeight();
-  //     var pageRatio = pageWidth / pageHeight;
-  //     var wc;
+  /**
+   * Generate a single custom-height PDF page (Layout “C”).
+   * @private
+   * @param   {HTMLCanvasElement} canvas
+   * @returns {jsPDF}
+   */
+  _pdfOnePage(canvas) {
+    const scale = A4_CONTENT_WIDTH_MM / (canvas.width / PX_PER_MM);
+    const drawHmm = (canvas.height / PX_PER_MM) * scale;
+    const pageHmm = drawHmm + 2 * MARGIN_MM;
 
-  //     if (imgRatio >= 1) {
-  //       wc = imgWidth / pageWidth;
-  //       if (imgRatio >= pageRatio) {
-  //         pdf.addImage(imgData, 'JPEG', 0, (pageHeight - imgHeight / wc) / 2, pageWidth, imgHeight / wc, null, 'NONE');
-  //       } else {
-  //         var pi = pageRatio / imgRatio;
-  //         pdf.addImage(imgData, 'JPEG', (pageWidth - pageWidth / pi) / 2, 0, pageWidth / pi, (imgHeight / pi) / wc, null, 'NONE');
-  //       }
-  //     } else {
-  //       wc = imgWidth / pageHeight;
-  //       if (1 / imgRatio > pageRatio) {
-  //         var ip = (1 / imgRatio) / pageRatio;
-  //         var margin = (pageHeight - ((imgHeight / ip) / wc)) / 4;
-  //         pdf.addImage(imgData, 'JPEG', (pageWidth - (imgHeight / ip) / wc) / 2, -(((imgHeight / ip) / wc) + margin), pageHeight / ip, (imgHeight / ip) / wc, null, 'NONE', -90);
-  //       } else {
-  //         pdf.addImage(imgData, 'JPEG', (pageWidth - imgHeight / wc) / 2, -(imgHeight / wc), pageHeight, imgHeight / wc, null, 'NONE', -90);
-  //       }
-  //     }
-  //     return pdf;
-  //   },
-  convertImage2PDF: function (canvas) {
-    const MARGIN = 10; // mm, left = right; change to taste
-    const pdf = new jsPDF("p", "mm", "a4");
-    const imgData = canvas.toDataURL("image/png");
-
-    // Canvas size in px
-    const imgWidth = canvas.width;
-    const imgHeight = canvas.height;
-    const imgRatio = imgWidth / imgHeight;
-
-    // Usable page size in mm
-    const pageW = pdf.internal.pageSize.getWidth() - 2 * MARGIN;
-    const pageH = pdf.internal.pageSize.getHeight() - 2 * MARGIN;
-    const pageRatio = pageW / pageH;
-
-    // Scale to fit while preserving aspect-ratio
-    let drawW, drawH, offsetX, offsetY;
-    if (imgRatio > pageRatio) {
-      // image is “wider” than page
-      drawW = pageW;
-      drawH = drawW / imgRatio;
-    } else {
-      // image is “taller”
-      drawH = pageH;
-      drawW = drawH * imgRatio;
-    }
-    offsetX = (pageW - drawW) / 2 + MARGIN;
-    offsetY = (pageH - drawH) / 2 + MARGIN;
-
-    pdf.addImage(imgData, "PNG", offsetX, offsetY, drawW, drawH, null, "NONE");
+    const pdf = new jsPDF("p", "mm", [A4_WIDTH_MM, pageHmm]);
+    pdf.addImage(
+      canvas.toDataURL("image/jpeg", JPEG_QUALITY),
+      "JPEG",
+      MARGIN_MM,
+      MARGIN_MM,
+      A4_CONTENT_WIDTH_MM,
+      drawHmm,
+      null,
+      "FAST"
+    );
     return pdf;
   },
-  // get Image (DataURI to Tab / base64 to Apex Ajax)
-  getImage: function (
+  /**
+   * Generate a multi-page A4 PDF (true 10 mm top/bottom margins).
+   * @private
+   * @param   {HTMLCanvasElement} canvas
+   * @returns {jsPDF}
+   */
+  _pdfMultiPage(canvas) {
+    const pdf = new jsPDF("p", "mm", "a4");
+    const scale = A4_CONTENT_WIDTH_MM / canvas.width; // px → mm
+    const slicePx = Math.floor(A4_CONTENT_HEIGHT_MM / scale);
+    const pages = Math.ceil(canvas.height / slicePx);
+
+    for (let p = 0, ySrc = 0; p < pages; p++, ySrc += slicePx) {
+      if (p > 0) {
+        pdf.addPage();
+      }
+
+      const hPx = Math.min(slicePx, canvas.height - ySrc); // last slice
+      const slice = document.createElement("canvas");
+      Object.assign(slice, { width: canvas.width, height: hPx });
+      slice
+        .getContext("2d")
+        .drawImage(canvas, 0, ySrc, canvas.width, hPx, 0, 0, canvas.width, hPx);
+
+      pdf.addImage(
+        slice.toDataURL("image/jpeg", JPEG_QUALITY),
+        "JPEG",
+        MARGIN_MM,
+        MARGIN_MM,
+        A4_CONTENT_WIDTH_MM,
+        hPx * scale,
+        null,
+        "FAST"
+      );
+    }
+    return pdf;
+  },
+  /**
+   * Generate a single-page A4 PDF (Layout “S”).
+   * @private
+   * @param   {HTMLCanvasElement} canvas
+   * @returns {jsPDF}
+   */
+  _pdfOneA4Page(canvas) {
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageW = pdf.internal.pageSize.getWidth() - 2 * MARGIN_MM;
+    const pageH = pdf.internal.pageSize.getHeight() - 2 * MARGIN_MM;
+    const ratio = canvas.width / canvas.height;
+    const imgW = ratio > pageW / pageH ? pageW : pageH * ratio;
+    const imgH = imgW / ratio;
+    const offX = (pageW - imgW) / 2 + MARGIN_MM;
+    const offY = (pageH - imgH) / 2 + MARGIN_MM;
+
+    pdf.addImage(
+      canvas.toDataURL("image/jpeg", JPEG_QUALITY),
+      "JPEG",
+      offX,
+      offY,
+      imgW,
+      imgH,
+      null,
+      "FAST"
+    );
+
+    return pdf;
+  },
+  /**
+   * Decide which PDF variant to build.
+   * @param   {HTMLCanvasElement} canvas
+   * @param   {"CONT_PAGE"|"MULTI_PAGE_A4"|"SINGLE_A4"|undefined} layout  CONT_PAGE = continuous, MULTI_PAGE_A4 = multipage, SINGLE_A4/default = fit page
+   * @returns {jsPDF}
+   */
+  createPDF(canvas, layout) {
+    const ratio = canvas.width / canvas.height;
+    const drawW = A4_WIDTH_MM - 2 * MARGIN_MM;
+    const drawH = drawW / ratio;
+    const totalH = drawH + 2 * MARGIN_MM;
+
+    if (layout === "CONT_PAGE" && totalH <= PDF_MAX_MM) {
+      // continuous page up to 5080mm
+      return apexScreenCapture._pdfOnePage(canvas);
+    }
+    if (layout === "MULTI_PAGE_A4" || totalH > PDF_MAX_MM) {
+      /** multi-page A4 */
+      return apexScreenCapture._pdfMultiPage(canvas);
+    } else {
+      /* default: single standard A4 page */
+      return apexScreenCapture._pdfOneA4Page(canvas);
+    }
+  },
+  /* ---- collectStyleSheets() : returns full <link> + <style> HTML ---- */
+  /**
+   * Collect every stylesheet the current page loads from /i/ and return
+   * fully-qualified <link> tags plus inline CSS rules.  Query strings
+   * (?v=22.2.4) are stripped so pdfShift treats the URL as static.
+   */
+  collectAPEXStyleSheets() {
+    const links = Array.from(
+      document.querySelectorAll('link[rel="stylesheet"]')
+    )
+      .filter((link) => link.href.includes("/i/"))
+      .map((link) => {
+        const clean = link.href.split("?")[0]; // drop ?v=… or ?ver=…
+        return `<link rel="stylesheet" href="${clean}">`;
+      })
+      .join("\n");
+
+    const inlineCss = Array.from(document.styleSheets)
+      .map((ss) => {
+        try {
+          return Array.from(ss.cssRules)
+            .map((r) => r.cssText)
+            .join("\n");
+        } catch (e) {
+          console.error(ss + ": " + e);
+          return "";
+        } // CORS-protected, skip
+      })
+      .join("\n");
+
+    const ret = `${links}\n<style>\n${inlineCss}\n</style>`;
+    console.log(ret);
+
+    return ret;
+  },
+
+  buildHtmlShell(fragmentHtml) {
+    const ret = `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <title>APEX Capture</title>
+  
+          <base href="https://app.springsolutions.com/i/">
+          <link rel="stylesheet" href="${FONT_APEX_CSS}">
+          <link rel="stylesheet" href="${UT_CSS_URL}">
+  
+          <style>
+            ${Array.from(document.styleSheets)
+              .map((s) => {
+                try {
+                  return Array.from(s.cssRules)
+                    .map((r) => r.cssText)
+                    .join("\n");
+                } catch (e) {
+                  return "";
+                }
+              })
+              .join("\n")}
+          </style>
+        </head>
+        <body>
+          ${fragmentHtml /* The actual content to render */}
+        </body>
+      </html>
+    `;
+
+    console.log(ret);
+    return ret;
+  },
+  /**
+   * Convert an HTML snippet with pdfShift (sandbox) and download.
+   * @param {string} htmlSource   The HTML you want rendered.
+   * @param {string} fileName     Download name (defaults → capture.pdf)
+   * @param {Function} done       Optional callback when finished.
+   */
+  convertViaPdfShift(htmlSource, fileName, done) {
+    const authHeader = "Basic " + btoa("api:" + PDFSHIFT_KEY);
+
+    fetch("https://api.pdfshift.io/v3/convert/pdf", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader,
+      },
+      body: JSON.stringify({
+        source: htmlSource,
+        sandbox: USE_PDFSHIFT_SANDBOX, // <── no credits deducted
+        margin: MARGIN_MM || "mm",
+      }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(r.status);
+        return r.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = Object.assign(document.createElement("a"), {
+          href: url,
+          download: fileName,
+        });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        done();
+      })
+      .catch((e) => {
+        console.error("pdfShift error", e);
+        done();
+      });
+  },
+
+  /* -------------------------------------------------------------------- */
+  /*  Main public helpers                                                 */
+  /* -------------------------------------------------------------------- */
+
+  /**
+   * Convert a canvas to either an image or a PDF and deliver it
+   * (download, open tab, or upload to APEX collection).
+   * @param  {string}                                             ajaxIdentifier  APEX plugin Ajax ID (upload to DB mode).
+   * @param  {HTMLCanvasElement}                                  canvas
+   * @param  {"DIRECT_DOWNLOAD"|"NEW_TAB"|"DB_DOWNLOAD"}          openWindow      D = download, T = new tab, "B" = upload.
+   * @param  {string}                                             mimeType        image/png, image/jpeg, application/pdf
+   * @param  {string}                                             fileName        Base file name without extension.
+   * @param  {"CONT_PAGE"|"MULTI_PAGE_A4"|"SINGLE_A4"|undefined}  pdfLayout       Continuous, Multi-page or default.
+   * @param  {Function}                                           done            Callback after completion.
+   */
+  getImage(
     ajaxIdentifier,
     canvas,
     openWindow,
     mimeType,
     fileName,
-    callback
+    pdfLayout,
+    done = () => {}
   ) {
-    var img, pdf;
+    let pdf, dataURI;
     if (mimeType === "application/pdf") {
-      pdf = apexScreenCapture.convertImage2PDF(canvas);
-      img = pdf.output("datauristring");
+      pdf = apexScreenCapture.createPDF(canvas, pdfLayout);
+      dataURI = pdf.output("datauristring");
     } else {
-      img = canvas.toDataURL(mimeType);
+      dataURI = canvas.toDataURL(mimeType);
     }
 
-    var base = fileName && fileName.trim() ? fileName.trim() : 'screencapture';
-    var ext  = (mimeType === 'application/pdf') ? '.pdf'
-             : (mimeType === 'image/png')      ? '.png'
-             : '.jpg';
-
-    // Direct download option
-    if (openWindow === "D") {
-      if (mimeType === "application/pdf") {
-        // jsPDF v2.x has a built-in save() that triggers download
-        pdf.save(base + ext);
-      } else {
-        // image: create a temporary <a download>
-        var link = document.createElement("a");
-        link.href = img; // data URL
-        // choose extension by MIME type
-        link.download = base + ext;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    /* --- Direct download --- */
+    if (openWindow === "DIRECT_DOWNLOAD") {
+      if (pdf) {
+        pdf.save(filename);
+      } /* image */ else {
+        const a = Object.assign(document.createElement("a"), {
+          href: dataURI,
+          download: filename,
+        });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
       }
-      callback();
+      return done();
     }
-    // Open in new browser tab
-    if (openWindow === "T") {
-      if (mimeType === "application/pdf") {
+
+    /* --- Open in new tab --- */
+    if (openWindow === "NEW_TAB") {
+      if (pdf) {
         window.open(pdf.output("bloburl"), "_blank");
-      } else {
-        window.open().document.write('<img src="' + img + '" />');
+      } /* image */ else {
+        window.open().document.write(`<img src="${dataURI}" />`);
       }
-      callback();
+      return done();
     }
-    // Download to DB
-    else {
-      // img DataURI to base64
-      var base64 = apexScreenCapture.dataURI2base64(img);
-      // split base64 clob string to f01 array length 30k
-      var f01Array = [];
-      f01Array = apexScreenCapture.clob2Array(base64, 30000, f01Array);
-      // APEX Ajax Call
-      apex.server.plugin(
-        ajaxIdentifier,
-        {
-          f01: f01Array,
-          x01: mimeType,
+
+    /* --- Upload to DB via APEX plugin --- */
+    const base64 = apexScreenCapture.dataURI2base64(dataURI);
+    const f01 = apexScreenCapture.clob2Array(base64, CLOB_CHUNK_SIZE);
+
+    apex.server.plugin(
+      ajaxIdentifier,
+      { f01, x01: mimeType },
+      {
+        dataType: "html",
+        success: () => {
+          $("body").trigger("screencapture-saved-db");
+          done();
         },
-        {
-          dataType: "html",
-          // SUCESS function
-          success: function () {
-            // add apex event
-            $("body").trigger("screencapture-saved-db");
-            callback();
-          },
-          // ERROR function
-          error: function (xhr, pMessage) {
-            // add apex event
-            $("body").trigger("screencapture-error-db");
-            // logging
-            console.log("getImage: apex.server.plugin ERROR:", pMessage);
-            callback();
-          },
-        }
-      );
-    }
+        error: (_xhr, msg) => {
+          $("body").trigger("screencapture-error-db");
+          console.error("getImage apex.server.plugin error:", msg);
+          done();
+        },
+      }
+    );
   },
-  // html2canvas function
-  doHtml2Canvas: function (
-    pHtmlElem,
-    pOpenWindow,
-    pAjaxIdentifier,
-    pBackground,
-    pWidth,
-    pHeight,
-    pLetterRendering,
-    pAllowTaint,
-    pMimeType,
-    pLogging,
-    pFileName
+  /**
+   * Wrapper around html2canvas with SVG pre-processing and APEX spinner.
+   * @param {...any} see call from captureScreen
+   */
+  doHtml2Canvas(
+    htmlElem,
+    openWindow,
+    ajaxId,
+    background,
+    width,
+    height,
+    letterRendering,
+    allowTaint,
+    mimeType,
+    logging,
+    fileName,
+    pdfLayout
   ) {
-    // Logging
-    if (pLogging) {
-      console.log("doHtml2Canvas: HTML element:", pHtmlElem);
-      console.log("doHtml2Canvas: element width:", pWidth);
-      console.log("doHtml2Canvas: element height:", pHeight);
-    }
-    // wait spinner
-    var lSpinner$ = apex.util.showSpinner($("body"));
-    lSpinner$.attr("data-html2canvas-ignore", "true");
-    // html2canvas with svg2canvas
-    apexScreenCapture.svg2canvas("body", function () {
-      html2canvas($(pHtmlElem), {
-        onrendered: function (canvas) {
-          // getImage
+    /* Show spinner */
+    const $spinner = apex.util
+      .showSpinner($("body"))
+      .attr("data-html2canvas-ignore", "true");
+
+    /* Convert embedded SVGs first */
+    apexScreenCapture.svg2canvas("body", () => {
+      html2canvas($(htmlElem), {
+        background,
+        width,
+        height,
+        letterRendering,
+        allowTaint,
+        useCORS: true,
+        logging,
+        onrendered: (canvas) => {
           apexScreenCapture.getImage(
-            pAjaxIdentifier,
+            ajaxId,
             canvas,
-            pOpenWindow,
-            pMimeType,
-            pFileName,
-            function () {
-              // remove spinner
-              lSpinner$.remove();
-            }
+            openWindow,
+            mimeType,
+            fileName,
+            pdfLayout,
+            () => $spinner.remove() // always remove spinner
           );
         },
-        useCORS: true,
-        background: pBackground,
-        width: pWidth,
-        height: pHeight,
-        letterRendering: pLetterRendering,
-        allowTaint: pAllowTaint,
-        logging: pLogging,
       });
-      // remove tmp svg2canvas
-      $("body").find(".tempCanvas").remove();
-      $("body").find(".tempHide").show().removeClass("tempHide");
+
+      /* Cleanup temp canvases / hidden SVGs */
+      $("body").find(".asc-temp-canvas").remove();
+      $("body").find(".asc-temp-hide").show().removeClass("asc-temp-hide");
     });
   },
-  // html2canvas with DOM selector function
-  doHtml2CanvasDom: function (
-    pElement,
-    pOpenWindow,
-    pAjaxIdentifier,
-    pBackground,
-    pLetterRendering,
-    pAllowTaint,
-    pMimeType,
-    pLogging,
-    pFileName
-  ) {
-    // Parameter
-    pWidth = $(pElement).width();
-    pHeight = $(pElement).height();
-    // Logging
-    if (pLogging) {
-      console.log("doHtml2CanvasDom: Clicked element:", pElement);
-      console.log("doHtml2CanvasDom: element width:", pWidth);
-      console.log("doHtml2CanvasDom: element height:", pHeight);
+  /* -------------------------------------------------------------------- */
+  /*  Entry point called by the Dynamic Action plugin                     */
+  /* -------------------------------------------------------------------- */
+  captureScreen() {
+    const cfg = this.action; // provided by APEX DA
+    const jQuerySelector = cfg.attribute01; // HTML element to capture
+    const downloadType = cfg.attribute02; // Download type
+    const backgroundColor = cfg.attribute04; // hex color string
+    const widthInPixels = cfg.attribute05; // optional forced width
+    const heightInPixels = cfg.attribute06; // optional forced height
+    const doLetterRendering = apexScreenCapture.parseBoolean(cfg.attribute07);
+    const doAllowTaint = apexScreenCapture.parseBoolean(cfg.attribute08);
+    const doLogging = apexScreenCapture.parseBoolean(cfg.attribute09);
+    const pdfLayout = cfg.attribute10;
+    const fileName = cfg.attribute14; // file name for direct download
+    const imageType = cfg.attribute15; // PNG / JPEG / PDF
+
+    const mimeType =
+      imageType === "PNG"
+        ? "image/png"
+        : imageType === "JPEG"
+        ? "image/jpeg"
+        : imageType === "PDF"
+        ? "application/pdf"
+        : "image/png";
+
+    const safeBase = (
+      typeof fileName === "string" && fileName.trim().length
+        ? fileName.trim() // user-supplied
+        : DEFAULT_FILENAME
+    ) // fallback
+      .replace(/[\\/:*?"<>|]/g, "_");
+
+    const ext =
+      imageType === "PDF" ? ".pdf" : imageType === "JPEG" ? ".jpg" : ".png";
+
+    const sanitizedFileName =
+      safeBase + (downloadType === "PDFSHIFT" ? "pdf" : ext);
+
+    // Size of selected element (or full viewport for "body")
+    let elemWidthPx, elemHeightPx;
+    if (jQuerySelector !== "body") {
+      elemWidthPx = $(jQuerySelector).innerWidth();
+      elemHeightPx = $(jQuerySelector).innerHeight();
+    } else {
+      elemWidthPx = document.documentElement.clientWidth;
+      elemHeightPx = document.documentElement.clientHeight;
     }
-    // wait spinner
-    var lSpinner$ = apex.util.showSpinner($("body"));
-    lSpinner$.attr("data-html2canvas-ignore", "true");
-    // html2canvas with svg2canvas
-    apexScreenCapture.svg2canvas("body", function () {
-      html2canvas($(pElement), {
-        onrendered: function (canvas) {
-          // getImage
-          apexScreenCapture.getImage(
-            pAjaxIdentifier,
-            canvas,
-            pOpenWindow,
-            pMimeType,
-            pFileName,
-            function () {
-              // remove spinner
-              lSpinner$.remove();
-            }
-          );
-        },
-        useCORS: true,
-        background: pBackground,
-        width: pWidth,
-        height: pHeight,
-        letterRendering: pLetterRendering,
-        allowTaint: pAllowTaint,
-        logging: pLogging,
+    if (widthInPixels) {
+      elemWidthPx = parseInt(widthInPixels, 10);
+    }
+    if (heightInPixels) {
+      elemHeightPx = parseInt(heightInPixels, 10);
+    }
+
+    // Debug console logging
+    if (doLogging) {
+      console.table({
+        jQuerySelector,
+        downloadType,
+        backgroundColor,
+        elemWidthPx,
+        elemHeightPx,
+        doLetterRendering,
+        doAllowTaint,
+        mimeType,
+        fileName,
+        sanitizedFileName,
+        pdfLayout,
+        FONT_APEX_CSS,
+        UT_CSS_URL,
       });
-      // remove tmp svg2canvas
-      $("body").find(".tempCanvas").remove();
-      $("body").find(".tempHide").show().removeClass("tempHide");
-    });
-  },
-  // function that gets called from plugin
-  captureScreen: function () {
-    // plugin attributes
-    var daThis = this;
-    var vAjaxIdentifier = daThis.action.ajaxIdentifier;
-    var vHtmlElem = daThis.action.attribute01;
-    var vOpenWindow = daThis.action.attribute02;
-    var vBackground = daThis.action.attribute04;
-    var vWidth = parseInt(daThis.action.attribute05);
-    var vHeight = parseInt(daThis.action.attribute06);
-    var vLetterRendering = apexScreenCapture.parseBoolean(
-      daThis.action.attribute07
-    );
-    var vAllowTaint = apexScreenCapture.parseBoolean(daThis.action.attribute08);
-    var vLogging = apexScreenCapture.parseBoolean(daThis.action.attribute09);
-    var vDomSelector = daThis.action.attribute10;
-    var vDomFilter = daThis.action.attribute11;
-    var vDomHideLabel = apexScreenCapture.parseBoolean(
-      daThis.action.attribute12
-    );
-    var vDomFillContent = apexScreenCapture.parseBoolean(
-      daThis.action.attribute13
-    );
-    var vDomBorderColor = "#09c";
-    var vFileName = daThis.action.attribute14;
-    var vImageType = daThis.action.attribute15;
-    var vImageMimeType;
-    // device/element width/height
-    var lWidth;
-    var lHeight;
-    if (vHtmlElem !== "body") {
-      lWidth = parseInt($(vHtmlElem).innerWidth());
-      lHeight = parseInt($(vHtmlElem).innerHeight());
-    } else {
-      lWidth = parseInt(document.documentElement.clientWidth);
-      lHeight = parseInt(document.documentElement.clientHeight);
     }
-    // override with plugin attributes
-    if (vWidth) {
-      lWidth = vWidth;
-    }
-    if (vHeight) {
-      lHeight = vHeight;
-    }
-    // defaults for DOM Outliner
-    if (vDomFilter === null || vDomFilter === undefined) {
-      vDomFilter = false;
-    }
-    if (vDomHideLabel === null || vDomHideLabel === undefined) {
-      vDomHideLabel = false;
-    }
-    if (vDomFillContent === null || vDomFillContent === undefined) {
-      vDomFillContent = false;
-    }
-    // Image mimeType
-    if (vImageType == "PNG") {
-      vImageMimeType = "image/png";
-    } else if (vImageType == "JPEG") {
-      vImageMimeType = "image/jpeg";
-    } else if (vImageType == "PDF") {
-      vImageMimeType = "application/pdf";
-    } else {
-      vImageMimeType = "image/png";
-    }
-    // Logging
-    if (vLogging) {
-      console.log("captureScreen: Attribute JQuery selector:", vHtmlElem);
-      console.log("captureScreen: Attribute open window:", vOpenWindow);
-      console.log("captureScreen: Attribute background:", vBackground);
-      console.log("captureScreen: Attribute element width:", lWidth);
-      console.log("captureScreen: Attribute element height:", lHeight);
-      console.log(
-        "captureScreen: Attribute letter rendering:",
-        vLetterRendering
+
+    if (downloadType === "PDFSHIFT") {
+      /* Show spinner */
+      const $spinner = apex.util
+        .showSpinner($("body"))
+        .attr("data-html2canvas-ignore", "true");
+
+      const fragmentClean = $(jQuerySelector)
+        .clone(true, true) // deep clone
+        .find("[data-html2canvas-ignore]") // ← the only filter
+        .remove() // delete those nodes
+        .end() // back to cloned root
+        .prop("outerHTML");
+
+      const htmlDoc = apexScreenCapture.buildHtmlShell(
+        $(jQuerySelector).prop("outerHTML")
       );
-      console.log("captureScreen: Attribute allow taint:", vAllowTaint);
-      console.log("captureScreen: Attribute Logging:", vLogging);
-      console.log("captureScreen: Attribute DOM selector:", vDomSelector);
-      console.log("captureScreen: Attribute DOM filter:", vDomFilter);
-      console.log("captureScreen: Attribute hide label:", vDomHideLabel);
-      console.log("captureScreen: Attribute fill content:", vDomFillContent);
-      //console.log("captureScreen: Attribute border color:", vDomBorderColor);
-      console.log("captureScreen: Attribute image mime-type:", vImageMimeType);
-      console.log("captureScreen: Attribute Filename:", vFileName);
-    }
-    if (vDomSelector == "Y") {
-      // html2canvas with DOM Outliner
-      var myClickHandler = function (element) {
-        apexScreenCapture.doHtml2CanvasDom(
-          element,
-          vOpenWindow,
-          vAjaxIdentifier,
-          vBackground,
-          vLetterRendering,
-          vAllowTaint,
-          vImageMimeType,
-          vLogging,
-          vFileName
-        );
-      };
-      var myDomOutline = DomOutline({
-        onClick: myClickHandler,
-        filter: vDomFilter,
-        stopOnClick: true,
-        borderColor: vDomBorderColor,
-        hideLabel: vDomHideLabel,
-        fillContent: vDomFillContent,
-      });
-      myDomOutline.start();
-    } else {
-      // html2canvas
-      apexScreenCapture.doHtml2Canvas(
-        vHtmlElem,
-        vOpenWindow,
-        vAjaxIdentifier,
-        vBackground,
-        lWidth,
-        lHeight,
-        vLetterRendering,
-        vAllowTaint,
-        vImageMimeType,
-        vLogging,
-        vFileName
+      apexScreenCapture.convertViaPdfShift(htmlDoc, sanitizedFileName, () =>
+        $spinner.remove()
       );
+      return;
     }
+
+    // Call html2canvas
+    apexScreenCapture.doHtml2Canvas(
+      jQuerySelector, // element to rasterise
+      downloadType,
+      cfg.ajaxIdentifier, // APEX Ajax plug-in ID
+      backgroundColor,
+      elemWidthPx,
+      elemHeightPx,
+      doLetterRendering,
+      doAllowTaint,
+      mimeType,
+      doLogging,
+      sanitizedFileName,
+      pdfLayout
+    );
   },
 };
