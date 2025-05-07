@@ -6,12 +6,18 @@
 This plugin allows you to take "screenshots/captures" of pages or parts of it, directly on the users browser.
 The screenshot is based on the DOM and as such may not be 100% accurate to the real representation as it does not make an actual screenshot, but builds the screenshot based on the information available on the page.
 
-**Works best in modern browsers** [For more informations visit html2canvas](https://github.com/niklasvh/html2canvas)
+This plugin also allows PDFShift integration for more accurate HTML rendering.
+
+**Works best in modern browsers** 
+
+[For more informations visit html2canvas](https://github.com/niklasvh/html2canvas)
+[PDFShift](https://pdfshift.io/)
 
 
 ## Changelog
 
-#### Spring 1.9.6 - CORS support, force vertical orientation, replace DOM Selector color option with filename option, add direct download option
+#### Spring 2.1 - PDFShift Integration
+#### Spring 2.0 - CORS support, force vertical orientation, replace DOM Selector color option with filename option, add direct download option
 
 ---
 
@@ -48,30 +54,31 @@ The screenshot is based on the DOM and as such may not be 100% accurate to the r
 
 ## Install
 
-- Import plugin file "dynamic_action_plugin_apex_screencapture_1-9-6.sql" from source directory into your application
+- Import plugin file "spring-apex-screen-capture-v2.1.0.sql" from source directory into your application
 - (Optional) Deploy the JS files from "server" directory on your webserver and change the "File Prefix" to webservers folder.
 
 
 ## Plugin Settings
 
 The plugin settings are highly customizable and you can change:
-- **DOM UI Selector** - Choose if a graphical selector should be used or not.
-- **DOM Filter** - A selector that an element should match in order to be outlined and clicked. Default is 'div'. No value means no filter is enabled and all elements would be outlined.
-- **Hide Label** - Shows/Hides a label above the visual indicator. The label contains the element's name, id, class name, and dimensions.
-- **Selector Border Color** - Color of the DOM selector outline
-- **Selector Fill Content** - Whether the content of a selected area is filled with color or not. (30% darker than selector´s border color)
 - **JQuery Selector** - Enter the JQuery Selector that should be captured
-- **Open image in new tab (or save to DB)** - Choose whether the image should be opened in a new window or saved to DB using custom PL/SQL (for BLOBs)
+- **Download Type** - Choose whether the image should be opened in a new window, directly downloaded, saved to DB using custom PL/SQL (for BLOBs), or downloaded via PDFShift
 - **PLSQL Code** - PLSQL code which saves the image to database tables or collections
+- **Logging** - Whether to log events in the console
+### Download Type PDFShift:
+- **Portrait / Landscape PDF** - Render PDF in portait or landscape
+- **PDFShift Zoom** - Zoom scaling for PDF (0..2]. < 1 is rendered smaller, > 1 is rendered larger.
+### Download Type Other than PDFShift:
 - **Background color** - Canvas background color, if none is specified in DOM. Set undefined for transparent
 - **Width** - Width in pixels (default screen width)
 - **Height** - Height in pixels (default screen height)
 - **Output-Type** - Output-Type of the resulting screenshot image (e.g. PNG, JPEG, PDF)
 - **Letter rendering** - Whether to render each letter separately
 - **Allow taint** - Whether to allow cross-origin images to taint the canvas
-- **Logging** - Whether to log events in the console
+- **PDF Mutli-Page Handling** - Whether to download PDFs as a single A4 page, multiple A4 pages, or attempt a long continuous page
 
-## Plugin Events
+
+## Plugin Events (not supported for PDFShift mode)
 - **Screen Capture - Saved to DB** - DA event that fires when the image is successfully saved to DB
 - **Screen Capture - Error saving to DB** - DA event that fires when saving to DB had an error
 
