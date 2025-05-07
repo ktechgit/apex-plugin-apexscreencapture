@@ -2,7 +2,7 @@
 // Author: Daniel Hochleitner - updated by Austin Huizinga
 // Version: 2.0.0
 
-const MARGIN_MM = 10; // side + top/bottom margin
+const MARGIN_MM = 25; // side + top/bottom margin
 const JPEG_QUALITY = 0.9; // 0-1 smaller → stronger compression
 const A4_WIDTH_MM = 210; // portrait width
 const A4_HEIGHT_MM = 297; // portrait height
@@ -16,7 +16,6 @@ const CLOB_CHUNK_SIZE = 30000; // max. size of f01 array elements
 
 const ICON_BASE = apex_img_dir || "/i/"; // UT image dir (APEX adds apex_img_dir)
 
-const PDFSHIFT_KEY = "####";
 const USE_PDFSHIFT_SANDBOX = true; // use sandbox mode (no credits deducted, watermark)
 
 const UT_CSS_URL =
@@ -289,8 +288,8 @@ var apexScreenCapture = {
    * @param {string} fileName     Download name (defaults → capture.pdf)
    * @param {Function} done       Optional callback when finished.
    */
-  convertViaPdfShift(htmlSource, fileName, done) {
-    const authHeader = "Basic " + btoa("api:" + PDFSHIFT_KEY);
+  convertViaPdfShift(pdfShiftApiKey, htmlSource, orientation, fileName, pdfShiftZoom, done) {
+    const authHeader = "Basic " + btoa("api:" + pdfShiftApiKey);
 
     fetch("https://api.pdfshift.io/v3/convert/pdf", {
       method: "POST",
@@ -302,6 +301,12 @@ var apexScreenCapture = {
         source: htmlSource,
         sandbox: USE_PDFSHIFT_SANDBOX, // <── no credits deducted
         margin: MARGIN_MM || "mm",
+        remove_blank: true,
+        format: "A4",
+        //disable_javascript: true,
+        //disable_backgrounds: true,
+        landscape: orientation === "LANDSCAPE",
+        zoom: pdfShiftZoom
       }),
     })
       .then((r) => {
@@ -361,11 +366,11 @@ var apexScreenCapture = {
     /* --- Direct download --- */
     if (openWindow === "DIRECT_DOWNLOAD") {
       if (pdf) {
-        pdf.save(filename);
+        pdf.save(fileName);
       } /* image */ else {
         const a = Object.assign(document.createElement("a"), {
           href: dataURI,
-          download: filename,
+          download: fileName,
         });
         document.body.appendChild(a);
         a.click();
@@ -470,6 +475,9 @@ var apexScreenCapture = {
     const doAllowTaint = apexScreenCapture.parseBoolean(cfg.attribute08);
     const doLogging = apexScreenCapture.parseBoolean(cfg.attribute09);
     const pdfLayout = cfg.attribute10;
+    const pdfShiftApiKey = cfg.attribute11; // PDFShift API key
+    const pdfOrientation = cfg.attribute12; // PDF orientation
+    const pdfShiftZoom = cfg.attribute13;   // Zoom multiplier (0..2]
     const fileName = cfg.attribute14; // file name for direct download
     const imageType = cfg.attribute15; // PNG / JPEG / PDF
 
@@ -493,7 +501,7 @@ var apexScreenCapture = {
       imageType === "PDF" ? ".pdf" : imageType === "JPEG" ? ".jpg" : ".png";
 
     const sanitizedFileName =
-      safeBase + (downloadType === "PDFSHIFT" ? "pdf" : ext);
+      safeBase + (downloadType === "PDFSHIFT" ? ".pdf" : ext);
 
     // Size of selected element (or full viewport for "body")
     let elemWidthPx, elemHeightPx;
@@ -525,10 +533,27 @@ var apexScreenCapture = {
         fileName,
         sanitizedFileName,
         pdfLayout,
-        FONT_APEX_CSS,
-        UT_CSS_URL,
+        pdfOrientation,
+        pdfShiftZoom
       });
     }
+
+    // Remove APEX report links (e.g. "Download" / "Print")
+    $(jQuerySelector)
+      .find(".t-Report-links")
+      .attr("data-html2canvas-ignore", "true");
+    $(jQuerySelector)
+      .find(".u-Report-sortIcon")
+      .attr("data-html2canvas-ignore", "true");
+    $(jQuerySelector)
+      .find(".a-Icon")
+      .attr("data-html2canvas-ignore", "true");  
+    $(jQuerySelector)
+    .find(".a-IRR-toolbar")
+    .attr("data-html2canvas-ignore", "true");
+    $(jQuerySelector)
+    .find(".a-IRR-controlsContainer")
+    .attr("data-html2canvas-ignore", "true");
 
     if (downloadType === "PDFSHIFT") {
       /* Show spinner */
@@ -544,10 +569,15 @@ var apexScreenCapture = {
         .prop("outerHTML");
 
       const htmlDoc = apexScreenCapture.buildHtmlShell(
-        $(jQuerySelector).prop("outerHTML")
+        $(fragmentClean).prop("outerHTML")
       );
-      apexScreenCapture.convertViaPdfShift(htmlDoc, sanitizedFileName, () =>
-        $spinner.remove()
+      apexScreenCapture.convertViaPdfShift(
+        pdfShiftApiKey,
+        htmlDoc,
+        pdfLayout,
+        sanitizedFileName,
+        pdfShiftZoom,
+        () => $spinner.remove()
       );
       return;
     }
