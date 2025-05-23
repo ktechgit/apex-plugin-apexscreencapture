@@ -16,7 +16,7 @@ const CLOB_CHUNK_SIZE = 30000; // max. size of f01 array elements
 
 const ICON_BASE = apex_img_dir || "/i/"; // UT image dir (APEX adds apex_img_dir)
 
-const USE_PDFSHIFT_SANDBOX = true; // use sandbox mode (no credits deducted, watermark)
+const USE_PDFSHIFT_SANDBOX = false; // use sandbox mode (no credits deducted, watermark)
 
 const UT_CSS_URL =
   "https://app.springsolutions.com/i/themes/theme_42/22.2/css/Core.min.css";
