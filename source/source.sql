@@ -1,7 +1,16 @@
 /*-------------------------------------
  * APEX Screen Capture functions
- * Version: 1.9.5 (21.10.2019)
- * Author:  Daniel Hochleitner
+ * Original Version: 1.9.5 (21.10.2019)  - Daniel Hochleitner
+ * Fork Version   : 1.9.6  (2025-04-29)  - Austin Huizinga
+ * 1.9.6  - Added:
+ *   - attribute_14 as "File Name" (DOM Selector color is now fixed) - custom download name
+ *   - openWindow = 'D' -> direct download (no pop-up)
+ *   - js improvements: useCORS, portrait PDF, fixed 10 mm PDF margins
+ * 2.2.0  - Merged:
+ *   - attribute_04 changed from backgroundColor to margin (mm)
+ *   - Dynamic margin threaded through all PDF generation functions
+ *   - Enhanced pdfShift error handling with full response body logging
+ *   - Fixed orientation bug (pdfOrientation passed correctly to convertViaPdfShift)
  *-------------------------------------
 */
 FUNCTION render_screencapture(p_dynamic_action IN apex_plugin.t_dynamic_action,
@@ -11,19 +20,19 @@ FUNCTION render_screencapture(p_dynamic_action IN apex_plugin.t_dynamic_action,
   -- plugin attributes
   l_result           apex_plugin.t_dynamic_action_render_result;
   l_html_elem        VARCHAR2(200) := p_dynamic_action.attribute_01;
-  l_open_window      VARCHAR2(10) := p_dynamic_action.attribute_02;
+  l_open_window      VARCHAR2(50) := p_dynamic_action.attribute_02;
   l_plsql            p_dynamic_action.attribute_03%TYPE := p_dynamic_action.attribute_03;
-  l_background       VARCHAR2(10) := p_dynamic_action.attribute_04;
+  l_margin           NUMBER := p_dynamic_action.attribute_04;
   l_width            NUMBER := p_dynamic_action.attribute_05;
   l_height           NUMBER := p_dynamic_action.attribute_06;
   l_letter_rendering VARCHAR2(50) := p_dynamic_action.attribute_07;
   l_allow_taint      VARCHAR2(50) := p_dynamic_action.attribute_08;
   l_logging          VARCHAR2(50) := p_dynamic_action.attribute_09;
-  l_dom_selector     VARCHAR2(50) := p_dynamic_action.attribute_10;
-  l_dom_filter       VARCHAR2(100) := p_dynamic_action.attribute_11;
-  l_dom_hidelabel    VARCHAR2(50) := p_dynamic_action.attribute_12;
-  l_dom_fillcontent  VARCHAR2(50) := p_dynamic_action.attribute_13;
-  l_border_color     VARCHAR2(50) := p_dynamic_action.attribute_14;
+  l_pdf_layout       VARCHAR2(50) := p_dynamic_action.attribute_10;
+  l_pdfshift_key     VARCHAR(200) := :PDF_SHIFT_API_KEY;
+  l_pdf_orientation  VARCHAR2(50) := p_dynamic_action.attribute_12;
+  l_pdfshift_zoom    NUMBER       := p_dynamic_action.attribute_13;
+  l_file_name        VARCHAR2(255) := p_dynamic_action.attribute_14;
   l_image_mime_type  VARCHAR2(50) := p_dynamic_action.attribute_15;
   -- js file vars
   l_apexscreencapture_js VARCHAR2(50);
@@ -57,22 +66,20 @@ BEGIN
   -- attribute defaults
   l_open_window      := nvl(l_open_window,
                             'Y');
-  l_dom_selector     := nvl(l_dom_selector,
-                            'N');
+  l_pdf_layout       := nvl(l_pdf_layout,
+                             'SINGLE_A4');
   l_letter_rendering := nvl(l_letter_rendering,
                             'false');
   l_allow_taint      := nvl(l_allow_taint,
                             'false');
-  l_dom_hidelabel    := nvl(l_dom_hidelabel,
-                            'false');
-  l_dom_fillcontent  := nvl(l_dom_fillcontent,
-                            'false');
-  l_border_color     := nvl(l_border_color,
-                            '#09c');
   l_image_mime_type  := nvl(l_image_mime_type,
                             'PNG');
   l_logging          := nvl(l_logging,
                             'false');
+  l_pdf_orientation  := nvl(l_pdf_orientation,
+                             'PORTRAIT');
+  l_pdfshift_zoom    := nvl(l_pdfshift_zoom, 1);
+  l_margin           := nvl(l_margin, 25);
   --
   -- add html2canvas js / screencapture js / jquery dom outline js (and promise for older browsers)
   apex_javascript.add_library(p_name           => l_promise_js,
@@ -90,13 +97,6 @@ BEGIN
                               p_directory      => p_plugin.file_prefix,
                               p_version        => NULL,
                               p_skip_extension => FALSE);
-  -- only when Dom selector is enabled
-  IF l_dom_selector = 'Y' THEN
-    apex_javascript.add_library(p_name           => l_domoutline_js,
-                                p_directory      => p_plugin.file_prefix,
-                                p_version        => NULL,
-                                p_skip_extension => FALSE);
-  END IF;
   -- add jsPDF lib for PDF outputs
   IF l_image_mime_type = 'PDF' THEN
     apex_javascript.add_library(p_name           => l_jspdf_js,
@@ -116,17 +116,17 @@ BEGIN
   l_result.attribute_01        := l_html_elem;
   l_result.attribute_02        := l_open_window;
   l_result.attribute_03        := l_plsql;
-  l_result.attribute_04        := l_background;
+  l_result.attribute_04        := l_margin;
   l_result.attribute_05        := l_width;
   l_result.attribute_06        := l_height;
   l_result.attribute_07        := l_letter_rendering;
   l_result.attribute_08        := l_allow_taint;
   l_result.attribute_09        := l_logging;
-  l_result.attribute_10        := l_dom_selector;
-  l_result.attribute_11        := l_dom_filter;
-  l_result.attribute_12        := l_dom_hidelabel;
-  l_result.attribute_13        := l_dom_fillcontent;
-  l_result.attribute_14        := l_border_color;
+  l_result.attribute_10        := l_pdf_layout;
+  l_result.attribute_11        := l_pdfshift_key;
+  l_result.attribute_12        := l_pdf_orientation;
+  l_result.attribute_13        := l_pdfshift_zoom;
+  l_result.attribute_14        := l_file_name;
   l_result.attribute_15        := l_image_mime_type;
   --
   RETURN l_result;

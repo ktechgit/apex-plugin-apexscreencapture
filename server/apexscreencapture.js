@@ -1,15 +1,13 @@
 // APEX Screen Capture
 // Author: Daniel Hochleitner - updated by Austin Huizinga
-// Version: 2.0.0
+// Version: 2.2.0
 
 const MARGIN_MM = 25; // side + top/bottom margin
 const JPEG_QUALITY = 0.9; // 0-1 smaller → stronger compression
 const A4_WIDTH_MM = 210; // portrait width
 const A4_HEIGHT_MM = 297; // portrait height
 const PDF_MAX_MM = 5080; // Max pdf height in mm
-const A4_CONTENT_WIDTH_MM = A4_WIDTH_MM - 2 * MARGIN_MM; // content width
-const A4_CONTENT_HEIGHT_MM = A4_HEIGHT_MM - 2 * MARGIN_MM; // content height
-const PX_PER_MM = 96 / 25.4; // jsPDF’s dpi assumption
+const PX_PER_MM = 96 / 25.4; // jsPDF's dpi assumption
 const DEFAULT_FILENAME = "screencapture"; // default file name
 
 const CLOB_CHUNK_SIZE = 30000; // max. size of f01 array elements
@@ -98,23 +96,25 @@ var apexScreenCapture = {
     }
   },
   /**
-   * Generate a single custom-height PDF page (Layout “C”).
+   * Generate a single custom-height PDF page (Layout "C").
    * @private
    * @param   {HTMLCanvasElement} canvas
+   * @param   {number} margin    Margin in mm (left/right/top/bottom).
    * @returns {jsPDF}
    */
-  _pdfOnePage(canvas) {
-    const scale = A4_CONTENT_WIDTH_MM / (canvas.width / PX_PER_MM);
+  _pdfOnePage(canvas, margin) {
+    const contentWidth = A4_WIDTH_MM - 2 * margin;
+    const scale = contentWidth / (canvas.width / PX_PER_MM);
     const drawHmm = (canvas.height / PX_PER_MM) * scale;
-    const pageHmm = drawHmm + 2 * MARGIN_MM;
+    const pageHmm = drawHmm + 2 * margin;
 
     const pdf = new jsPDF("p", "mm", [A4_WIDTH_MM, pageHmm]);
     pdf.addImage(
       canvas.toDataURL("image/jpeg", JPEG_QUALITY),
       "JPEG",
-      MARGIN_MM,
-      MARGIN_MM,
-      A4_CONTENT_WIDTH_MM,
+      margin,
+      margin,
+      contentWidth,
       drawHmm,
       null,
       "FAST"
@@ -125,12 +125,15 @@ var apexScreenCapture = {
    * Generate a multi-page A4 PDF (true 10 mm top/bottom margins).
    * @private
    * @param   {HTMLCanvasElement} canvas
+   * @param   {number} margin    Margin in mm (left/right/top/bottom).
    * @returns {jsPDF}
    */
-  _pdfMultiPage(canvas) {
+  _pdfMultiPage(canvas, margin) {
     const pdf = new jsPDF("p", "mm", "a4");
-    const scale = A4_CONTENT_WIDTH_MM / canvas.width; // px → mm
-    const slicePx = Math.floor(A4_CONTENT_HEIGHT_MM / scale);
+    const contentWidth = A4_WIDTH_MM - 2 * margin;
+    const contentHeight = A4_HEIGHT_MM - 2 * margin;
+    const scale = contentWidth / canvas.width; // px → mm
+    const slicePx = Math.floor(contentHeight / scale);
     const pages = Math.ceil(canvas.height / slicePx);
 
     for (let p = 0, ySrc = 0; p < pages; p++, ySrc += slicePx) {
@@ -148,9 +151,9 @@ var apexScreenCapture = {
       pdf.addImage(
         slice.toDataURL("image/jpeg", JPEG_QUALITY),
         "JPEG",
-        MARGIN_MM,
-        MARGIN_MM,
-        A4_CONTENT_WIDTH_MM,
+        margin,
+        margin,
+        contentWidth,
         hPx * scale,
         null,
         "FAST"
@@ -159,20 +162,21 @@ var apexScreenCapture = {
     return pdf;
   },
   /**
-   * Generate a single-page A4 PDF (Layout “S”).
+   * Generate a single-page A4 PDF (Layout "S").
    * @private
    * @param   {HTMLCanvasElement} canvas
+   * @param   {number} margin    Margin in mm (left/right/top/bottom).
    * @returns {jsPDF}
    */
-  _pdfOneA4Page(canvas) {
+  _pdfOneA4Page(canvas, margin) {
     const pdf = new jsPDF("p", "mm", "a4");
-    const pageW = pdf.internal.pageSize.getWidth() - 2 * MARGIN_MM;
-    const pageH = pdf.internal.pageSize.getHeight() - 2 * MARGIN_MM;
+    const pageW = pdf.internal.pageSize.getWidth() - 2 * margin;
+    const pageH = pdf.internal.pageSize.getHeight() - 2 * margin;
     const ratio = canvas.width / canvas.height;
     const imgW = ratio > pageW / pageH ? pageW : pageH * ratio;
     const imgH = imgW / ratio;
-    const offX = (pageW - imgW) / 2 + MARGIN_MM;
-    const offY = (pageH - imgH) / 2 + MARGIN_MM;
+    const offX = (pageW - imgW) / 2 + margin;
+    const offY = (pageH - imgH) / 2 + margin;
 
     pdf.addImage(
       canvas.toDataURL("image/jpeg", JPEG_QUALITY),
@@ -191,24 +195,25 @@ var apexScreenCapture = {
    * Decide which PDF variant to build.
    * @param   {HTMLCanvasElement} canvas
    * @param   {"CONT_PAGE"|"MULTI_PAGE_A4"|"SINGLE_A4"|undefined} layout  CONT_PAGE = continuous, MULTI_PAGE_A4 = multipage, SINGLE_A4/default = fit page
+   * @param   {number} margin  Margin in mm (left/right/top/bottom).
    * @returns {jsPDF}
    */
-  createPDF(canvas, layout) {
+  createPDF(canvas, layout, margin) {
     const ratio = canvas.width / canvas.height;
-    const drawW = A4_WIDTH_MM - 2 * MARGIN_MM;
+    const drawW = A4_WIDTH_MM - 2 * margin;
     const drawH = drawW / ratio;
-    const totalH = drawH + 2 * MARGIN_MM;
+    const totalH = drawH + 2 * margin;
 
     if (layout === "CONT_PAGE" && totalH <= PDF_MAX_MM) {
       // continuous page up to 5080mm
-      return apexScreenCapture._pdfOnePage(canvas);
+      return apexScreenCapture._pdfOnePage(canvas, margin);
     }
     if (layout === "MULTI_PAGE_A4" || totalH > PDF_MAX_MM) {
       /** multi-page A4 */
-      return apexScreenCapture._pdfMultiPage(canvas);
+      return apexScreenCapture._pdfMultiPage(canvas, margin);
     } else {
       /* default: single standard A4 page */
-      return apexScreenCapture._pdfOneA4Page(canvas);
+      return apexScreenCapture._pdfOneA4Page(canvas, margin);
     }
   },
   /* ---- collectStyleSheets() : returns full <link> + <style> HTML ---- */
@@ -254,11 +259,11 @@ var apexScreenCapture = {
         <head>
           <meta charset="utf-8">
           <title>APEX Capture</title>
-  
+
           <base href="https://app.springsolutions.com/i/">
           <link rel="stylesheet" href="${FONT_APEX_CSS}">
           <link rel="stylesheet" href="${UT_CSS_URL}">
-  
+
           <style>
             ${Array.from(document.styleSheets)
               .map((s) => {
@@ -284,11 +289,23 @@ var apexScreenCapture = {
   },
   /**
    * Convert an HTML snippet with pdfShift (sandbox) and download.
-   * @param {string} htmlSource   The HTML you want rendered.
-   * @param {string} fileName     Download name (defaults → capture.pdf)
-   * @param {Function} done       Optional callback when finished.
+   * @param {string}   pdfShiftApiKey  API key for pdfShift.
+   * @param {string}   htmlSource      The HTML you want rendered.
+   * @param {string}   orientation     PDF orientation (LANDSCAPE or PORTRAIT).
+   * @param {string}   fileName        Download name (defaults → capture.pdf).
+   * @param {number}   pdfShiftZoom    Zoom multiplier (0..2].
+   * @param {number}   margin          Margin in mm.
+   * @param {Function} done            Optional callback when finished.
    */
-  convertViaPdfShift(pdfShiftApiKey, htmlSource, orientation, fileName, pdfShiftZoom, done) {
+  convertViaPdfShift(
+    pdfShiftApiKey,
+    htmlSource,
+    orientation,
+    fileName,
+    pdfShiftZoom,
+    margin,
+    done
+  ) {
     const authHeader = "Basic " + btoa("api:" + pdfShiftApiKey);
 
     fetch("https://api.pdfshift.io/v3/convert/pdf", {
@@ -300,17 +317,26 @@ var apexScreenCapture = {
       body: JSON.stringify({
         source: htmlSource,
         sandbox: USE_PDFSHIFT_SANDBOX, // <── no credits deducted
-        margin: MARGIN_MM || "mm",
+        margin: margin || "mm",
         remove_blank: true,
         format: "A4",
-        //disable_javascript: true,
-        //disable_backgrounds: true,
         landscape: orientation === "LANDSCAPE",
-        zoom: pdfShiftZoom
+        zoom: pdfShiftZoom,
       }),
     })
-      .then((r) => {
-        if (!r.ok) throw new Error(r.status);
+      .then(async (r) => {
+        if (!r.ok) {
+          let errorMessage = `HTTP ${r.status}: ${r.statusText}`;
+          try {
+            const errorBody = await r.text();
+            if (errorBody) {
+              errorMessage += ` - ${errorBody}`;
+            }
+          } catch (parseError) {
+            errorMessage += ` (Could not parse error body)`;
+          }
+          throw new Error(errorMessage);
+        }
         return r.blob();
       })
       .then((blob) => {
@@ -326,7 +352,7 @@ var apexScreenCapture = {
         done();
       })
       .catch((e) => {
-        console.error("pdfShift error", e);
+        console.error("pdfShift error", e.message || e);
         done();
       });
   },
@@ -344,6 +370,7 @@ var apexScreenCapture = {
    * @param  {string}                                             mimeType        image/png, image/jpeg, application/pdf
    * @param  {string}                                             fileName        Base file name without extension.
    * @param  {"CONT_PAGE"|"MULTI_PAGE_A4"|"SINGLE_A4"|undefined}  pdfLayout       Continuous, Multi-page or default.
+   * @param  {number}                                             margin          Margin in mm.
    * @param  {Function}                                           done            Callback after completion.
    */
   getImage(
@@ -353,11 +380,12 @@ var apexScreenCapture = {
     mimeType,
     fileName,
     pdfLayout,
+    margin,
     done = () => {}
   ) {
     let pdf, dataURI;
     if (mimeType === "application/pdf") {
-      pdf = apexScreenCapture.createPDF(canvas, pdfLayout);
+      pdf = apexScreenCapture.createPDF(canvas, pdfLayout, margin);
       dataURI = pdf.output("datauristring");
     } else {
       dataURI = canvas.toDataURL(mimeType);
@@ -418,7 +446,6 @@ var apexScreenCapture = {
     htmlElem,
     openWindow,
     ajaxId,
-    background,
     width,
     height,
     letterRendering,
@@ -426,6 +453,7 @@ var apexScreenCapture = {
     mimeType,
     logging,
     fileName,
+    margin,
     pdfLayout
   ) {
     /* Show spinner */
@@ -436,7 +464,6 @@ var apexScreenCapture = {
     /* Convert embedded SVGs first */
     apexScreenCapture.svg2canvas("body", () => {
       html2canvas($(htmlElem), {
-        background,
         width,
         height,
         letterRendering,
@@ -451,6 +478,7 @@ var apexScreenCapture = {
             mimeType,
             fileName,
             pdfLayout,
+            margin,
             () => $spinner.remove() // always remove spinner
           );
         },
@@ -468,7 +496,7 @@ var apexScreenCapture = {
     const cfg = this.action; // provided by APEX DA
     const jQuerySelector = cfg.attribute01; // HTML element to capture
     const downloadType = cfg.attribute02; // Download type
-    const backgroundColor = cfg.attribute04; // hex color string
+    const margin = cfg.attribute04; // margin for pdf in mm
     const widthInPixels = cfg.attribute05; // optional forced width
     const heightInPixels = cfg.attribute06; // optional forced height
     const doLetterRendering = apexScreenCapture.parseBoolean(cfg.attribute07);
@@ -477,7 +505,7 @@ var apexScreenCapture = {
     const pdfLayout = cfg.attribute10;
     const pdfShiftApiKey = cfg.attribute11; // PDFShift API key
     const pdfOrientation = cfg.attribute12; // PDF orientation
-    const pdfShiftZoom = cfg.attribute13;   // Zoom multiplier (0..2]
+    const pdfShiftZoom = cfg.attribute13; // Zoom multiplier (0..2]
     const fileName = cfg.attribute14; // file name for direct download
     const imageType = cfg.attribute15; // PNG / JPEG / PDF
 
@@ -524,7 +552,7 @@ var apexScreenCapture = {
       console.table({
         jQuerySelector,
         downloadType,
-        backgroundColor,
+        margin,
         elemWidthPx,
         elemHeightPx,
         doLetterRendering,
@@ -534,7 +562,7 @@ var apexScreenCapture = {
         sanitizedFileName,
         pdfLayout,
         pdfOrientation,
-        pdfShiftZoom
+        pdfShiftZoom,
       });
     }
 
@@ -545,15 +573,13 @@ var apexScreenCapture = {
     $(jQuerySelector)
       .find(".u-Report-sortIcon")
       .attr("data-html2canvas-ignore", "true");
+    $(jQuerySelector).find(".a-Icon").attr("data-html2canvas-ignore", "true");
     $(jQuerySelector)
-      .find(".a-Icon")
-      .attr("data-html2canvas-ignore", "true");  
+      .find(".a-IRR-toolbar")
+      .attr("data-html2canvas-ignore", "true");
     $(jQuerySelector)
-    .find(".a-IRR-toolbar")
-    .attr("data-html2canvas-ignore", "true");
-    $(jQuerySelector)
-    .find(".a-IRR-controlsContainer")
-    .attr("data-html2canvas-ignore", "true");
+      .find(".a-IRR-controlsContainer")
+      .attr("data-html2canvas-ignore", "true");
 
     if (downloadType === "PDFSHIFT") {
       /* Show spinner */
@@ -574,9 +600,10 @@ var apexScreenCapture = {
       apexScreenCapture.convertViaPdfShift(
         pdfShiftApiKey,
         htmlDoc,
-        pdfLayout,
+        pdfOrientation,
         sanitizedFileName,
         pdfShiftZoom,
+        margin,
         () => $spinner.remove()
       );
       return;
@@ -587,7 +614,6 @@ var apexScreenCapture = {
       jQuerySelector, // element to rasterise
       downloadType,
       cfg.ajaxIdentifier, // APEX Ajax plug-in ID
-      backgroundColor,
       elemWidthPx,
       elemHeightPx,
       doLetterRendering,
@@ -595,6 +621,7 @@ var apexScreenCapture = {
       mimeType,
       doLogging,
       sanitizedFileName,
+      margin,
       pdfLayout
     );
   },
