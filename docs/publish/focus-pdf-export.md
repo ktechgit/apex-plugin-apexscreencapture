@@ -6,34 +6,29 @@ connie-dont-change-parent-page: true
 
 # HowTo: Focus PDF Export with Plugin (PDFScreenCapture)
 
-Use the Spring APEX Screen Capture plugin's **PDFShift** path to export Focus report HTML with its formatting. This guide covers reusable setup, interactive-report handling, optional page numbering, and a complete grouped-report example from [GB-19](https://springsolutions.atlassian.net/browse/GB-19).
+Use the Spring APEX Screen Capture plugin with **PDFShift** to export Focus reports as PDF files. The PDF keeps the report formatting. This guide includes general setup and a complete [GB-19](https://springsolutions.atlassian.net/browse/GB-19) example.
 
-PDFShift converts a cloned report fragment and its available styles. It does not query the database, apply pending filter edits, or fetch unloaded report pages. Display all matching rows before export and wait for the report refresh to finish.
+PDFShift converts a copy of the report HTML and its styles. It does not read the database or load other report pages. Apply the filters and display all matching rows before export. Wait for the report refresh to finish.
 
 ## 1. Import the plugin
 
-1. Get the reviewed [plugin export](../../source/spring-apex-to-pdf-v2.2.sql).
+1. Open the [plugin export on GitHub](https://github.com/ktechgit/apex-plugin-apexscreencapture/blob/master/source/spring-apex-to-pdf-v2.2.sql). Select **Download raw file** to save the SQL file.
 2. In the target APEX application, open **Shared Components → Plug-ins → Import** and import the SQL export.
 3. Keep the installed plugin's source files synchronized with [`server/`](../../server/) and its renderer with [`source/source.sql`](../../source/source.sql).
 
-Only JavaScript source is maintained in Git. APEX owns generated minified variants. The renderer loads source files in both debug and normal modes, so the import works without a separate minification step. This trades smaller normal-mode downloads for a single, consistent source path.
+Git contains the JavaScript source files, not the generated minified files. APEX generates minified files. The plugin loads source files in both debug and normal modes.
 
-## 2. Get the PDFShift API key
+## 2. Check the API key only if PDF download fails
 
-1. In LastPass, open **Shared-Spring → PDFShift PDF Shift**, using the **vendor-accounts@springsolutions.com** account.
-2. Use that saved login to sign in to [PDFShift API Keys](https://app.pdfshift.io/env/apikeys).
-3. Locate **Legal Tech** and use its copy-token control. Do not use the **CIP** key for this setup.
-4. Provision the copied token in the target application's parameter store through the normal credential setup process.
+Most new schemas and Focus instances already include the API-key item and computation. **Do not create them again.** GB-19 did not need this setup.
 
-![Shared Spring PDFShift login in LastPass](assets/pdfshift-lastpass.png)
+First, configure the report and try a PDF download. If the download fails, check the error. If the error indicates a missing or invalid API key, check the settings below.
 
-![PDFShift API Keys with the Legal Tech copy control highlighted and token values redacted](assets/pdfshift-api-keys.png)
+### Check the existing application item
 
-### Application item and computation
+Check for application item **`PDF_SHIFT_API_KEY`** and its computation after authentication. The parameter-store name is **`PDFSHIFT_API_KEY`**. These names are different.
 
-Create the application item **`PDF_SHIFT_API_KEY`**. The plugin binds to that exact name. The existing parameter-store convention uses **`PDFSHIFT_API_KEY`** without the extra underscore; these are different identifiers.
-
-Create an application computation after authentication using **SQL Query (return single value)**:
+If the setup is missing, create the item and computation. Set the computation type to **SQL Query (return single value)**:
 
 ```sql
 select p_value
@@ -41,14 +36,25 @@ from system_parameters
 where p_name = 'PDFSHIFT_API_KEY'
 ```
 
-The query must return exactly one nonempty value. Use a computation error message such as `Unable to retrieve PDFShift API key from system_parameters`.
+The query must return one nonempty value. Use an error message such as `Unable to retrieve PDFShift API key from system_parameters`.
+
+### Get the key if it is missing or invalid
+
+1. In LastPass, open **Shared-Spring → PDFShift PDF Shift**, using the **vendor-accounts@springsolutions.com** account.
+2. Use that saved login to sign in to [PDFShift API Keys](https://app.pdfshift.io/env/apikeys).
+3. Locate **Legal Tech** and use its copy-token control. Do not use the **CIP** key for this setup.
+4. Save the copied token in the application's parameter store through the normal credential setup process.
+
+![Shared Spring PDFShift login in LastPass|480x206](assets/pdfshift-lastpass.png)
+
+![PDFShift API Keys with the Legal Tech copy control highlighted and token values redacted|600x175](assets/pdfshift-api-keys.png)
 
 ## 3. Configure the report and Export PDF button
 
 1. Wrap the report content in a nonvisual region if no suitable parent exists. Set its **Static ID** to `reptBody`, without the hash.
 2. Create **Export PDF** in the top-right area above the filters/data grid. Set its action to **Defined by Dynamic Action**.
 3. Create a click dynamic action on the button. Add a true action using **APEX Screen Capture (w/ PDFShift)** and disable **Fire on Initialization**.
-4. Select the settings below. Wait for any asynchronous report refresh before capture.
+4. Select the settings below. Wait for the report refresh to finish before capture.
 
 | Setting | Configuration |
 | --- | --- |
@@ -68,49 +74,155 @@ Add this to the **Custom Attributes** of buttons or child regions that should no
 data-html2canvas-ignore="true"
 ```
 
-PDFShift mode explicitly removes descendants bearing the attribute. Presence is enough: a value of `"false"` still excludes a descendant. The selected export root itself is not removed. The plugin already excludes the interactive-report toolbar and controls; add a printable applied-filter summary if readers need it in the PDF.
+The plugin removes child elements with this attribute, even when its value is `"false"`. It does not remove the selected capture element. The plugin already excludes the interactive-report toolbar and controls. Add a filter summary to the PDF if readers need it.
 
 ## 4. Interactive Report Handling
 
-Interactive reports need preparation because their on-screen sticky-header structure is not the same as a printable table. Use the following approach for a report that exports all rendered rows in one PDFShift conversion. Region IDs and group-marker classes are report-specific; the plugin does not perform these preparation steps automatically.
+APEX can put a sticky heading in a separate table. That structure can cause incorrect headings in the PDF. Prepare the report before export, then restore it after capture. The plugin does not do these steps automatically.
 
-### Capture complete, current data
+The generic example uses these Static IDs:
 
-Apply filters and wait for the report refresh to finish. Configure the report to display all matching rows, not only the current report page. Select the generated `#<static_id>_content` container when it contains the data you need without surrounding controls. Do not start a refresh and export immediately: capture would use the old DOM.
+| Region | Static ID | Use |
+| --- | --- | --- |
+| Report wrapper | `reptWrap` | Contains the title and report. Set the plugin selector to `#reptWrap`. |
+| Interactive report | `reptBody` | APEX creates `reptBody_content` inside this region. Use this ID for table preparation and CSS. |
+| PDF title | `pdfTitle` | Optional title region inside the wrapper. Use **Blank with Attributes** for the title and wrapper. |
 
-### Prepare the native table heading
+Replace these IDs with your report's IDs. Apply filters and display all matching rows before capture. Wait for the report refresh to finish.
 
-Before the plugin action:
+### Action 1: prepare the report
 
-1. Remove detached sticky-header copies and their placeholders. Leaving them in the capture can produce misaligned or duplicated headings.
-2. Reset the data table's sticky-header margin offset. A zero-margin override alone did not fix continuation-page overlap in GB-19, but removes the leftover on-screen positioning offset.
-3. If the native column-heading row is in `<tbody>`, move it into a `<thead>` on that same data table. Repeated headings require a real table header; styling a body row alone is insufficient.
+Add **Execute JavaScript Code** before the plugin action:
 
-These operations change the live report, not just the export clone. The GB-19 example below shows the complete preparation and restoration sequence. Its sticky cleanup uses page-wide selectors inherited from the working setup; on pages with multiple reports, scope cleanup to the intended report and inspect where APEX places its header copies before reusing it.
+```javascript
+// Remove the on-screen sticky heading and its placeholder.
+$('.js-stickyTableHeader').remove();
+$('.js-stickyWidget-placeholder').remove();
 
-### Allow page flow without splitting body rows
+const report = document.getElementById('reptBody_content');
+const row = report.querySelector('th.a-IRR-header')?.closest('tr');
 
-Use `display: table-header-group` and `break-inside: avoid` on `<thead>`. Also use `break-inside: avoid; page-break-inside: avoid;` on **individual body rows**. Protecting the heading alone did not prevent overlap on continuation pages in GB-19; adding body-row protection corrected the reported failure.
+// A real table heading can repeat on later PDF pages.
+if (row && row.parentElement.tagName !== 'THEAD') {
+  const table = row.closest('table');
+  const thead = table.tHead || table.createTHead();
+  thead.appendChild(row);
+}
 
-Do not prevent breaks inside the entire table or `<tbody>`: long reports and groups must still span pages. A row taller than a printable page cannot be kept together, so unusually long cells need separate layout consideration.
+report.querySelectorAll('table.a-IRR-table').forEach(table => {
+  table.style.setProperty('margin-top', '0px', 'important');
+});
 
-The plugin copies accessible page CSS into the HTML shell. **Keep pagination rules outside `@media print`.** PDFShift defaults to screen media, and the plugin does not send `use_print: true`. Page-break rules affect paginated output without introducing page gaps on the normal scrolling page.
+// Omit this step if the wrapper has no PDF title region.
+document.getElementById('pdfTitle').classList.add('pdf-export-visible');
+```
 
-### Start each group on a new page
+This moves the existing heading row into `<thead>`. It does not add a second heading row. The zero margin removes the sticky-header offset.
 
-Give group-header rows a distinct HTML marker. Target the containing `tr`, not an inline label, and exclude subtotal/grand-total markers. CSS has no standard text-contains selector; matching names is not a reliable grouping contract.
+The first two selectors affect the whole page. For a page with multiple interactive reports, inspect the sticky-heading locations and limit the cleanup to the target report.
 
-Use a sibling selector to break before every group after the first. This assumes all group headers share a table-body parent and the report preserves group order. Long groups then spill across pages naturally. If `:has` is unavailable, JavaScript can mark the same header rows with a class; that changes selector compatibility, not table fragmentation behavior.
+### Page CSS: repeat headings and keep rows together
 
-### Restore interactive behavior after capture
+Add this to **CSS → Inline**:
 
-Add a separate **Execute JavaScript Code** action after the plugin action to refresh the report region. This rebuilds the normal sticky header and restores scrolling behavior. The current PDFShift path clones and serializes the report synchronously before starting its network request, so this later refresh does not alter the captured document.
+```css
+#reptBody_content thead {
+  display: table-header-group;
+  break-inside: avoid;
+}
 
-This ordering is specific to the current plugin: if capture becomes asynchronous in a future version, restoration must wait until serialization completes.
+#reptBody_content thead tr {
+  break-inside: avoid;
+  break-after: avoid;
+}
 
-### Optional borders through page-break whitespace
+#reptBody_content tbody > tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+```
 
-A table or wrapper border may continue through blank space before a forced page break. To remove a table-level border while retaining row/cell borders, try `border: 0` on the report's `table.a-IRR-table`, leaving `td` and `th` borders intact. If the line remains, inspect the surrounding APEX wrapper's computed borders rather than removing all descendant borders. This cosmetic adjustment was proposed separately; it is not required for the working pagination setup below.
+Body-row protection fixed the heading overlap on GB-19 continuation pages. A zero-margin override alone did not fix it. Do not apply `break-inside: avoid` to the whole table or `<tbody>`. Long reports must span pages. A row taller than a page cannot stay together.
+
+**Keep these rules outside `@media print`.** PDFShift uses screen styles unless the request sets `use_print: true`. The current plugin does not set that option.
+
+### Page CSS: start each group on a new page
+
+Add a class to each group heading in the report's HTML column. Do not add the class to totals:
+
+```html
+<span class="pdf-group-header">Group name</span>
+```
+
+Keep dynamic labels escaped in SQL. Turn off **Escape Special Characters** only for the column that renders this HTML.
+
+```css
+#reptBody_content tr:has(.pdf-group-header)
+  ~ tr:has(.pdf-group-header) {
+  break-before: page;
+  page-break-before: always;
+}
+```
+
+The first group stays on the first page. Each later group starts on a new page. Its remaining rows can continue onto later pages. The selector requires group heading rows with the same parent. Keep groups in order. CSS cannot select rows by their text.
+
+### Page CSS: show the title only in the PDF
+
+Put this HTML in the `pdfTitle` region. Replace the sample title and summary with your report's text or escaped page-item substitutions:
+
+```html
+<div class="rept-heading">
+  <h1>Report title</h1>
+  <p>Applied filter summary</p>
+</div>
+```
+
+```css
+#pdfTitle { display: none; }
+#pdfTitle.pdf-export-visible { display: block; }
+
+#pdfTitle .rept-heading { text-align: center; margin-bottom: 1rem; }
+#pdfTitle h1 { margin: 0; font-size: 1.25rem; line-height: 1.3; }
+#pdfTitle p { margin: .4rem 0 0; font-size: .85rem; line-height: 1.5; }
+
+html:has(#pdfTitle.pdf-export-visible),
+body:has(#pdfTitle.pdf-export-visible),
+#reptWrap:has(#pdfTitle.pdf-export-visible),
+#pdfTitle.pdf-export-visible {
+  background: #fff !important;
+  background-image: none !important;
+}
+```
+
+The temporary class shows the title and gives the PDF a white background. It does not remove table-header shading. Normal page styles return when the cleanup action removes the class.
+
+### Action 2: capture the wrapper
+
+Use **APEX Screen Capture (w/ PDFShift)** with selector `#reptWrap`. See section 3 for the other settings. Add the optional page-number flag from section 5 to Action 1 if needed.
+
+### Action 3: restore the report
+
+Add **Execute JavaScript Code** after the plugin action:
+
+```javascript
+// Omit this step if the wrapper has no PDF title region.
+document.getElementById('pdfTitle').classList.remove('pdf-export-visible');
+apex.region('reptBody').refresh();
+```
+
+The plugin copies the prepared HTML before it sends the request. Cleanup does not change that copy. Refresh restores the normal sticky heading and scrolling behavior. Do not refresh between preparation and capture.
+
+### Optional: remove a border through page-break space
+
+Try this if a table border extends through the blank space before a page break:
+
+```css
+#reptBody_content table.a-IRR-table {
+  border: 0 !important;
+}
+```
+
+This leaves cell borders intact. If the line remains, inspect the APEX wrapper borders. Do not remove all child borders. This optional adjustment is separate from the confirmed pagination fix.
 
 ## 5. Continuous Page X of Y
 
@@ -120,25 +232,25 @@ In the Export PDF dynamic action, immediately before the plugin action, set the 
 
 ```javascript
 document
-  .getElementById('reptBody_content')
+  .getElementById('reptWrap')
   .setAttribute('data-pdf-page-numbers', 'true');
 ```
 
-Replace the ID if the plugin captures a different element. The plugin reads the root element's attribute, not a descendant's. Only the exact string `"true"` enables numbering; an absent attribute or any other value omits the footer and preserves existing behavior. For a later export without numbering, remove the attribute or set it to `"false"`. Set the flag on each export because a report refresh rebuilds the captured element.
+Set the flag on the element selected by the plugin. The plugin does not read a child element's flag. Only `"true"` enables page numbers. To disable them, remove the attribute or set it to `"false"`. Set the flag before each export.
 
-The footer reads **Page X of Y**, right-aligned with bottom and right padding. Its inline styles and reserved footer height are defined in [`convertViaPdfShift`](../../server/apexscreencapture.js). Report CSS does not style the footer. Convert all groups in **one request** so numbering remains global; separate conversions restart numbering unless additional PDF post-processing is implemented. Austin confirmed the configured export works for GB-19; validate fit and spacing when adapting it to another report.
+The footer shows **Page X of Y** at the bottom right, with bottom and right padding. [`convertViaPdfShift`](../../server/apexscreencapture.js) defines the footer styles and height. Report CSS does not style the footer. Convert all groups in **one request** for one page-number sequence. Separate requests restart the page numbers. Check footer spacing when you use this setup on another report.
 
 See [PDFShift header/footer variables](https://docs.pdfshift.io/docs/header-footer) and the [conversion API](https://docs.pdfshift.io/api-reference/convert-to-pdf).
 
 ## 6. Full example: GB-19 Open A/R Aging with Split %
 
-Austin confirmed this report's configured export works, including the continuation-page fix. This example assembles the configuration in one place; it is not evidence that every other report has the same DOM or grouping semantics.
+Austin confirmed that this report's export works, including headings on later pages. This example contains the final setup. Other reports can have different HTML structures and filter behavior.
 
-![Open AR Aging report filters and column headings; client data and developer tools excluded](assets/gb-ar-filters.png)
+![Open AR Aging report filters and column headings; client data and developer tools excluded|600x177](assets/gb-ar-filters.png)
 
 ### Report and Focus page configuration
 
-Use the existing report from [GB-14](https://springsolutions.atlassian.net/browse/GB-14), with the PDF requirements in [GB-19](https://springsolutions.atlassian.net/browse/GB-19). Complete the plugin import and API-key application item/computation from sections 1–2 first.
+Use the existing report from [GB-14](https://springsolutions.atlassian.net/browse/GB-14), with the PDF requirements in [GB-19](https://springsolutions.atlassian.net/browse/GB-19). Import the plugin first. Check the API-key setup only if the PDF download fails with a key-related error. GB-19 already had that setup.
 
 | Location | Configuration | Purpose |
 | --- | --- | --- |
@@ -158,17 +270,19 @@ Use the existing report from [GB-14](https://springsolutions.atlassian.net/brows
 
 The supplied Page Designer screenshots show the actual button event and plugin settings:
 
-![GB-19 Export PDF event: Click, EXPORT_PDF button, Static scope, Immediate type](assets/gb-export-event.png)
+![GB-19 Export PDF event: Click, EXPORT_PDF button, Static scope, Immediate type|600x235](assets/gb-export-event.png)
 
-![GB-19 plugin capture selector and PDFShift download type](assets/gb-export-selector.png)
+![GB-19 plugin capture selector and PDFShift download type|600x71](assets/gb-export-selector.png)
 
-![GB-19 plugin margin, landscape orientation, zoom, and filename substitution](assets/gb-pdfshift-settings.png)
+![GB-19 plugin margin, landscape orientation, zoom, and filename substitution|600x116](assets/gb-pdfshift-settings.png)
 
 Apply filters and finish the report refresh before clicking Export PDF. If a button also applies filters, capture must run after that refresh completes, not merely after initiating it.
 
 ### PDF title and submitted-filter computations
 
-GB-19 applies filters by submitting and rerendering the page. Create hidden page items `P11_REPT_SUBTEXT` and `P11_PDF_FILENAME`, with **Before Header** computations of type **SQL Query (return single value)**. Submitted filters are in session state before these computations run, and substitutions resolve when the title and plugin action render. JavaScript item updates alone would not refresh those substitutions; this configuration depends on the full-page submission flow.
+GB-19 submits the filters and reloads the page. Create hidden page items `P11_REPT_SUBTEXT` and `P11_PDF_FILENAME`. For each item, create a **Before Header** computation of type **SQL Query (return single value)**.
+
+The computations use the submitted filters in session state. APEX then inserts the computed values into the title and filename. This setup requires a full page submission. JavaScript item changes alone do not update these substitutions.
 
 The final title is literal text, so no `P11_REPT_NAME` item is needed. Put this in the `pdfTitle` region's HTML Code:
 
@@ -398,7 +512,7 @@ document
   .setAttribute('data-pdf-page-numbers', 'true');
 ```
 
-The working action also contains the diagnostic block below after preparation. It logs table/header/wrapper layout and does not affect the export; keep it while investigating layout issues or omit it for routine use:
+The working action also includes this diagnostic block after preparation. It logs the table, heading, and wrapper styles. It does not change the export. Keep it for layout investigations or omit it for routine use:
 
 ```javascript
 const table = document
@@ -437,7 +551,7 @@ console.table([
 | Inline zero-margin override | Prevents ordinary sticky-widget margin updates from restoring the negative offset before capture. |
 | `data-pdf-page-numbers="true"` | Enables the plugin's optional bottom-right footer on the exact capture root. No extra dynamic-action attribute is needed. |
 
-**Action 2 — APEX Screen Capture (w/ PDFShift)**, using the settings above. This clones and serializes the prepared report, then submits one document to PDFShift. All shareholder pages share one page-number sequence.
+**Action 2 — APEX Screen Capture (w/ PDFShift)**, using the settings above. The plugin copies the prepared HTML and sends one document to PDFShift. All shareholder pages share one page-number sequence.
 
 **Action 3 — Execute JavaScript Code**, after the plugin:
 
@@ -449,7 +563,7 @@ document
 apex.region('openARSplitPct').refresh();
 ```
 
-Removing the class hides the live title and restores the normal background. The serialized export retains the class and its title because the plugin already copied the HTML. Refresh rebuilds the normal interactive report after live DOM preparation, avoiding the disappearing-header behavior on subsequent scrolling. Do not refresh between preparation and capture. The footer flag is reapplied by Action 1 on every export.
+The cleanup hides the title and restores the normal background. The exported copy keeps the visible title. Refresh restores the normal sticky heading and scrolling behavior. Do not refresh between preparation and capture. Action 1 sets the footer flag before each export.
 
 ### Why this report does not cycle the shareholder filter
 
@@ -461,7 +575,7 @@ where (:P11_SHAREHOLDER is null
                            where r2.shareholder = :P11_SHAREHOLDER))
 ```
 
-Selecting a shareholder retains all splits on matching matters, including other shareholders' rows. Cycling the filter and concatenating exports could duplicate groups and amounts. Preserve those report semantics; do not change the SQL predicate just to simplify PDF generation.
+Selecting a shareholder includes all splits on matching matters, including other shareholders' rows. Separate exports for each shareholder could duplicate groups and amounts. Keep the existing filter behavior. Do not change the SQL filter only to simplify PDF generation.
 
 ## Adapting the example to another report
 
