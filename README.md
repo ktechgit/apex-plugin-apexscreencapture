@@ -23,6 +23,8 @@ Configure repository secret `ATLASSIAN_API_TOKEN` with an Atlassian API token be
 
 The [publishing workflow](.github/workflows/publish.yml) runs only when documentation or the workflow changes on `master`. The guide's frontmatter pins existing page `876871686` and preserves its parent. Ensure the service account can read and update that page before the first publish; an inaccessible page can otherwise cause the publisher to fall back to title lookup.
 
+The publisher uses `forceOverwrite` so Git remains authoritative even when another account last edited the article. This setting applies to all pages selected by the publishing configuration, currently the single Focus guide; review that scope before adding more published documents. Confluence-only edits are overwritten. Verify the live page after publishing rather than treating workflow success alone as evidence.
+
 ## Attribution
 
 Forked from [Daniel Hochleitner's APEX Screen Capture plugin](https://github.com/Dani3lSun/apex-plugin-apexscreencapture). Includes html2canvas, jsPDF, canvg, es6-promise, and jQuery DOM Outline. See [LICENSE](LICENSE) and dependency source headers.
