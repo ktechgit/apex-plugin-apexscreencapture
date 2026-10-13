@@ -296,6 +296,7 @@ var apexScreenCapture = {
    * @param {number}   pdfShiftZoom    Zoom multiplier (0..2].
    * @param {number}   margin          Margin in mm.
    * @param {Function} done            Optional callback when finished.
+   * @param {boolean}  pageNumbers     Add a bottom-right Page X of Y footer.
    */
   convertViaPdfShift(
     pdfShiftApiKey,
@@ -304,7 +305,8 @@ var apexScreenCapture = {
     fileName,
     pdfShiftZoom,
     margin,
-    done
+    done,
+    pageNumbers = false
   ) {
     const authHeader = "Basic " + btoa("api:" + pdfShiftApiKey);
 
@@ -322,6 +324,12 @@ var apexScreenCapture = {
         format: "A4",
         landscape: orientation === "LANDSCAPE",
         zoom: pdfShiftZoom,
+        ...(pageNumbers ? {
+          footer: {
+            source: '<div style="box-sizing:border-box;width:100%;text-align:right;padding:0 5mm 3mm 0;font-family:Arial,sans-serif;font-size:10px;color:#666;">Page {{page}} of {{total}}</div>',
+            height: "12mm",
+          },
+        } : {}),
       }),
     })
       .then(async (r) => {
@@ -604,7 +612,8 @@ var apexScreenCapture = {
         sanitizedFileName,
         pdfShiftZoom,
         margin,
-        () => $spinner.remove()
+        () => $spinner.remove(),
+        $(jQuerySelector).attr("data-pdf-page-numbers") === "true"
       );
       return;
     }

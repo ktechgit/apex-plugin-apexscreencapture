@@ -1,0 +1,25 @@
+name: Publish to Confluence
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docs/publish/**'
+      - '.github/workflows/publish.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Publish Markdown to Confluence
+        uses: daniel-luper/publish-action@v1-quick-deploy
+        with:
+          atlassianApiToken: ${{ secrets.ATLASSIAN_API_TOKEN }}
+          configFile: ./docs/publish/.markdown-confluence.json

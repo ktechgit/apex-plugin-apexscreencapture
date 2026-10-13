@@ -1,0 +1,9 @@
+{
+  "confluenceBaseUrl": "https://api.atlassian.com/ex/confluence/e12b94e5-b6fa-4c29-82ce-97dcd63479fa",
+  "confluenceParentId": "27754497",
+  "atlassianUserName": "doc-bot-md-olt65h9ldt@serviceaccount.atlassian.com",
+  "folderToPublish": "docs/publish",
+  "contentRoot": ".",
+  "firstHeadingPageTitle": true,
+  "pageHeaderMarkdown": "> [!warning] This article is generated from GitHub; edits here will be overwritten. To change the contents, update `docs/publish` in [apex-plugin-apexscreencapture](https://github.com/ktechgit/apex-plugin-apexscreencapture)."
+}
