@@ -47,22 +47,14 @@ BEGIN
   IF apex_application.g_debug THEN
     apex_plugin_util.debug_dynamic_action(p_plugin         => p_plugin,
                                           p_dynamic_action => p_dynamic_action);
-    -- set js/css filenames
-    l_apexscreencapture_js := 'apexscreencapture';
-    l_html2canvas_js       := 'html2canvas';
-    l_promise_js           := 'es6-promise';
-    l_domoutline_js        := 'jquery.dom-outline-1.0';
-    l_canvg_js             := 'canvg-all';
-    l_jspdf_js             := 'jspdf';
-  ELSE
-    -- minified
-    l_apexscreencapture_js := 'apexscreencapture.min';
-    l_html2canvas_js       := 'html2canvas.min';
-    l_promise_js           := 'es6-promise.min';
-    l_domoutline_js        := 'jquery.dom-outline-1.0.min';
-    l_canvg_js             := 'canvg-all.min';
-    l_jspdf_js             := 'jspdf.min';
   END IF;
+  -- Source files work immediately after import, before APEX generates minified variants.
+  l_apexscreencapture_js := 'apexscreencapture';
+  l_html2canvas_js       := 'html2canvas';
+  l_promise_js           := 'es6-promise';
+  l_domoutline_js        := 'jquery.dom-outline-1.0';
+  l_canvg_js             := 'canvg-all';
+  l_jspdf_js             := 'jspdf';
   -- attribute defaults
   l_open_window      := nvl(l_open_window,
                             'Y');
