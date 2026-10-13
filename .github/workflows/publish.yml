@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Publish Markdown to Confluence
-        uses: markdown-confluence/publish-action@7710a0f79367aca135b8c892a7b717eac1a4c848 # v7.0.0
+        uses: markdown-confluence/publish-action@2a0af177d3d2eb33faf816a23f0316f093dcde80 # v6.0.0; retain the previously working v1 API
         with:
           atlassianApiToken: ${{ secrets.ATLASSIAN_API_TOKEN }}
           configFile: ./docs/publish/.markdown-confluence.json
