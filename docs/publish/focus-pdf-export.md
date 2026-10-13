@@ -152,9 +152,17 @@ Use the existing report from [GB-14](https://springsolutions.atlassian.net/brows
 | Capture action → JQuery Selector | `#reptWrap` | Captures both the PDF title and interactive report. Table preparation still targets `openARSplitPct_content`. |
 | Capture action → Download Type | PDFShift | Uses HTML conversion rather than canvas capture. |
 | Capture action → Orientation | Landscape for this wide report | Gives aging, total, and percentage columns room. |
-| Capture action → Margin / Zoom | Fit to the report and padded footer | These remain report-specific; retain the values that fit the installed report. |
+| Capture action → Margin / Zoom | GB-19 uses `25` mm / `.75` | Observed working settings for this report, not defaults for other reports. |
 | Capture action → File Name | `&P11_PDF_FILENAME.` | Uses the computed name at page rendering; plugin adds `.pdf`. |
 | Click dynamic action | Fire on Initialization off | Export runs on button click, not page initialization. |
+
+The supplied Page Designer screenshots show the actual button event and plugin settings:
+
+![GB-19 Export PDF event: Click, EXPORT_PDF button, Static scope, Immediate type](assets/gb-export-event.png)
+
+![GB-19 plugin capture selector and PDFShift download type](assets/gb-export-selector.png)
+
+![GB-19 plugin margin, landscape orientation, zoom, and filename substitution](assets/gb-pdfshift-settings.png)
 
 Apply filters and finish the report refresh before clicking Export PDF. If a button also applies filters, capture must run after that refresh completes, not merely after initiating it.
 
@@ -363,11 +371,11 @@ This helper removes on-screen header copies/placeholders and resets their table 
 **Action 1 — Execute JavaScript Code**, immediately before the plugin:
 
 ```javascript
+disableStickyHeaders();
+
 document
   .getElementById('pdfTitle')
   .classList.add('pdf-export-visible');
-
-disableStickyHeaders();
 
 const row = document
   .querySelector('#openARSplitPct_content th.a-IRR-header')
@@ -388,6 +396,37 @@ document
 document
   .getElementById('reptWrap')
   .setAttribute('data-pdf-page-numbers', 'true');
+```
+
+The working action also contains the diagnostic block below after preparation. It logs table/header/wrapper layout and does not affect the export; keep it while investigating layout issues or omit it for routine use:
+
+```javascript
+const table = document
+  .querySelector('#openARSplitPct_content th.a-IRR-header')
+  ?.closest('table');
+
+console.table([
+  table,
+  table?.tHead,
+  table?.tHead?.rows[0],
+  table?.tHead?.querySelector('th'),
+  table?.parentElement,
+  table?.parentElement?.parentElement
+].filter(Boolean).map(el => {
+  const css = getComputedStyle(el);
+  return {
+    element: el.tagName,
+    class: el.className,
+    display: css.display,
+    position: css.position,
+    top: css.top,
+    transform: css.transform,
+    height: el.getBoundingClientRect().height,
+    marginTop: css.marginTop,
+    overflowY: css.overflowY,
+    borderCollapse: css.borderCollapse
+  };
+}));
 ```
 
 | Preparation step | What it does |
