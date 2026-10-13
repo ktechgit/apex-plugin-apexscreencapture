@@ -142,19 +142,101 @@ Use the existing report from [GB-14](https://springsolutions.atlassian.net/brows
 
 | Location | Configuration | Purpose |
 | --- | --- | --- |
+| Report wrapper region | Static ID `reptWrap`; template **Blank with Attributes** | Contains PDF title and interactive report without extra region chrome. |
+| PDF title child region | Static ID `pdfTitle`; template **Blank with Attributes** | Hidden on screen, shown only during capture. |
 | Report region → Static ID | `openARSplitPct` | Stable identifier for capture, CSS, and region refresh. |
 | Interactive report → displayed rows | All matching rows | PDFShift captures the DOM, not unloaded report pages. |
 | Report description column | Display `DESCR_CELL`; Escape Special Characters off | Renders the query's hierarchy and group-marker HTML. Dynamic text must remain escaped in SQL. |
 | Report order | Preserve `SORT_KEY` order | Keeps each shareholder's headers, detail rows, and totals together. |
 | Export PDF button | Top-right above filters/grid; Defined by Dynamic Action | Runs preparation, capture, and restoration in order. |
-| Capture action → JQuery Selector | `#openARSplitPct_content` | Captures the generated interactive-report content container. |
+| Capture action → JQuery Selector | `#reptWrap` | Captures both the PDF title and interactive report. Table preparation still targets `openARSplitPct_content`. |
 | Capture action → Download Type | PDFShift | Uses HTML conversion rather than canvas capture. |
 | Capture action → Orientation | Landscape for this wide report | Gives aging, total, and percentage columns room. |
 | Capture action → Margin / Zoom | Fit to the report and padded footer | These remain report-specific; retain the values that fit the installed report. |
-| Capture action → File Name | For example, `Open AR Aging Split` | Descriptive download name; plugin adds `.pdf`. |
+| Capture action → File Name | `&P11_PDF_FILENAME.` | Uses the computed name at page rendering; plugin adds `.pdf`. |
 | Click dynamic action | Fire on Initialization off | Export runs on button click, not page initialization. |
 
 Apply filters and finish the report refresh before clicking Export PDF. If a button also applies filters, capture must run after that refresh completes, not merely after initiating it.
+
+### PDF title and submitted-filter computations
+
+GB-19 applies filters by submitting and rerendering the page. Create hidden page items `P11_REPT_SUBTEXT` and `P11_PDF_FILENAME`, with **Before Header** computations of type **SQL Query (return single value)**. Submitted filters are in session state before these computations run, and substitutions resolve when the title and plugin action render. JavaScript item updates alone would not refresh those substitutions; this configuration depends on the full-page submission flow.
+
+The final title is literal text, so no `P11_REPT_NAME` item is needed. Put this in the `pdfTitle` region's HTML Code:
+
+```html
+<div class="rept-heading">
+  <h1 id="reptName">Open A/R Aging — Split %</h1>
+  <p id="reptSubtext">&P11_REPT_SUBTEXT!HTML.</p><br/>
+</div>
+```
+
+The `!HTML` substitution escapes the summary safely. Configure `P11_REPT_SUBTEXT` with:
+
+```sql
+select
+    case
+        when :P11_END_DATE is null then 'All dates'
+        else 'Issued through ' || :P11_END_DATE
+    end
+    || ' · ' ||
+    case upper(nvl(:P11_DEPT_SCOPE, 'ALL'))
+        when 'EXCL' then 'Excluding internal'
+        when 'ONLY' then 'Internal only'
+        else 'All departments'
+    end
+    || ' · Shareholder: ' || nvl(:P11_SHAREHOLDER, 'All')
+    || ' · Client: ' ||
+    case
+        when :P11_CLIENT is null then 'All'
+        else nvl(
+            (select c.name
+               from contacts c
+              where c.id = to_number(
+                  :P11_CLIENT default null on conversion error
+              )),
+            :P11_CLIENT
+        )
+    end
+    || ' · Matter: ' ||
+    case
+        when :P11_MATTER is null then 'All'
+        else nvl(
+            (select m.display_number
+               from matters m
+              where m.id = to_number(
+                  :P11_MATTER default null on conversion error
+              )),
+            :P11_MATTER
+        )
+    end as subtext
+from dual
+```
+
+This resolves client/matter IDs to readable labels, describes department scope, and distinguishes unrestricted filters. **Issued through** describes the bill issue-date cutoff: the report's aging buckets still use `sysdate`, not the chosen end date.
+
+Configure `P11_PDF_FILENAME` with:
+
+```sql
+select
+    'Open_AR_Aging_Split_'
+    || case
+        when :P11_END_DATE is null then 'All_Dates'
+        else nvl(
+            to_char(
+                to_date(
+                    :P11_END_DATE default null on conversion error,
+                    'MM/DD/YYYY'
+                ),
+                'YYYY-MM-DD'
+            ),
+            'Invalid_Date'
+        )
+    end as filename
+from dual
+```
+
+The filename uses the issue-date cutoff, or `All_Dates`, without an extension. Ensure Clear Filters resets session-state filter values before the Before Header computations.
 
 ### SQL markers used by the export
 
@@ -208,6 +290,45 @@ Keep these rules outside `@media print`:
   break-inside: avoid;
   page-break-inside: avoid;
 }
+
+#pdfTitle .rept-heading {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+#pdfTitle .rept-heading h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+#pdfTitle .rept-heading p {
+  margin: .4rem 0 0;
+  font-size: .85rem;
+  line-height: 1.5;
+}
+
+/* Active in exported HTML while title is shown for capture. */
+html:has(#pdfTitle.pdf-export-visible),
+body:has(#pdfTitle.pdf-export-visible) {
+  background: #fff !important;
+  background-image: none !important;
+}
+
+#reptWrap:has(#pdfTitle.pdf-export-visible),
+#pdfTitle.pdf-export-visible {
+  background: #fff !important;
+  background-image: none !important;
+}
+
+#pdfTitle {
+  display: none;
+}
+
+#pdfTitle.pdf-export-visible {
+  display: block;
+}
 ```
 
 | CSS rule | What it does |
@@ -217,6 +338,11 @@ Keep these rules outside `@media print`:
 | Header-row `:has(...) ~ tr:has(...)` | Selects later shareholder header rows sharing the same parent. Skips the first to avoid a leading blank page. |
 | `<thead>` rules | Allows the native column heading to repeat and keeps it together. Requires the JavaScript promotion below. |
 | `tbody > tr` rules | Keeps body rows from splitting at page boundaries. This addition fixed the reported repeated-header overlap; margin reset alone did not. |
+| `.rept-heading` rules | Centers the title and summary, with a smaller heading and readable line spacing. |
+| `pdf-export-visible` display rules | Hides the title on screen and shows it during serialization into the exported document. |
+| Export-visible background rules | Paints the exported page, wrapper, and title white, including empty space below the report. Does not remove table-header shading or change the normal application theme. |
+
+Selecting a smaller capture region does not isolate it from theme CSS: the plugin creates a new HTML body with APEX styles. The temporary title class scopes the white-background override to the exported document. Avoid setting every descendant background to white, which would erase report shading. Austin confirmed the title and background rules work in GB-19.
 
 ### JavaScript → Function and Global Variable Declaration
 
@@ -237,6 +363,10 @@ This helper removes on-screen header copies/placeholders and resets their table 
 **Action 1 — Execute JavaScript Code**, immediately before the plugin:
 
 ```javascript
+document
+  .getElementById('pdfTitle')
+  .classList.add('pdf-export-visible');
+
 disableStickyHeaders();
 
 const row = document
@@ -256,12 +386,13 @@ document
   });
 
 document
-  .getElementById('openARSplitPct_content')
+  .getElementById('reptWrap')
   .setAttribute('data-pdf-page-numbers', 'true');
 ```
 
 | Preparation step | What it does |
 | --- | --- |
+| Show `pdfTitle` | Includes the heading/summary in capture and activates export-only white backgrounds. |
 | `disableStickyHeaders()` | Removes detached sticky headings that previously produced misaligned PDF columns. |
 | Find `th.a-IRR-header` and move its row | GB-19's native heading was in `<tbody>`. Promotes the existing row into the same table's `<thead>` so it can repeat. Does not duplicate the row. |
 | Inline zero-margin override | Prevents ordinary sticky-widget margin updates from restoring the negative offset before capture. |
@@ -272,10 +403,14 @@ document
 **Action 3 — Execute JavaScript Code**, after the plugin:
 
 ```javascript
+document
+  .getElementById('pdfTitle')
+  .classList.remove('pdf-export-visible');
+
 apex.region('openARSplitPct').refresh();
 ```
 
-Refresh rebuilds the normal interactive report after live DOM preparation, avoiding the disappearing-header behavior on subsequent scrolling. Do not refresh between preparation and capture. The footer flag is reapplied by Action 1 on every export.
+Removing the class hides the live title and restores the normal background. The serialized export retains the class and its title because the plugin already copied the HTML. Refresh rebuilds the normal interactive report after live DOM preparation, avoiding the disappearing-header behavior on subsequent scrolling. Do not refresh between preparation and capture. The footer flag is reapplied by Action 1 on every export.
 
 ### Why this report does not cycle the shareholder filter
 
